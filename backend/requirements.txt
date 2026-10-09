@@ -4,3 +4,4 @@ requests
 pydantic
 gspread
 google-auth
+psycopg[binary]

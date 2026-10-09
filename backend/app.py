@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -8,6 +8,7 @@ import csv
 import re
 import os
 import json
+import logging
 from io import StringIO
 
 try:
@@ -16,6 +17,13 @@ try:
 except ImportError:  # pragma: no cover - optional until credentials are configured
     gspread = None
     Credentials = None
+
+try:
+    from . import db
+except ImportError:  # run as `uvicorn app:app` from inside backend/
+    import db
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Inventory Backend API")
 
@@ -369,6 +377,30 @@ def fetch_items_from_sheet() -> List[Item]:
     return items
 
 
+def fetch_items_from_db() -> List[Item]:
+    return [Item(**{k: v for k, v in row.items() if k != "sheet_row"}) for row in db.fetch_items()]
+
+
+def load_items(response: Response) -> List[Item]:
+    """Postgres if DATABASE_URL is set (sheet fallback if unreachable), else the sheet.
+
+    The source that served the request is reported in the X-Data-Source header.
+    """
+    if db.enabled():
+        try:
+            items = fetch_items_from_db()
+            response.headers["X-Data-Source"] = "postgres"
+            return items
+        except db.Error as exc:
+            logger.warning("Postgres unavailable, falling back to Google Sheet: %s", exc)
+    response.headers["X-Data-Source"] = "sheet"
+    return fetch_items_from_sheet()
+
+
+def sheet_write_configured() -> bool:
+    return bool(os.getenv("GOOGLE_SHEETS_CREDENTIALS_PATH") or os.getenv("GOOGLE_SHEETS_CREDENTIALS_JSON"))
+
+
 # ==============================
 # ROUTES
 # ==============================
@@ -377,14 +409,25 @@ def root():
     return {"message": "Inventory API is running"}
 
 
+@app.get("/health")
+def health():
+    if not db.enabled():
+        return {"source": "sheet", "ok": True}
+    try:
+        db.ping()
+        return {"source": "postgres", "ok": True}
+    except db.Error:
+        return {"source": "postgres", "ok": False}
+
+
 @app.get("/items", response_model=List[Item])
-def get_items():
-    return fetch_items_from_sheet()
+def get_items(response: Response):
+    return load_items(response)
 
 
 @app.get("/kpis", response_model=KPIResponse)
-def calculate_kpis():
-    items_db = fetch_items_from_sheet()
+def calculate_kpis(response: Response):
+    items_db = load_items(response)
 
     # ==============================
     # BASIC KPIS
@@ -469,6 +512,28 @@ def calculate_kpis():
     )
 
 
+def update_quantity_in_db(item_id: str, quantity: int) -> QuantityUpdateResponse:
+    if quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be greater than 0.")
+    try:
+        row = db.set_quantity(item_id, quantity)
+    except db.Error as exc:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} was not found.")
+
+    # Keep the sheet (the inventorying app's hub) consistent when credentials exist.
+    if sheet_write_configured():
+        try:
+            update_sheet_quantity(item_id=item_id, quantity=quantity)
+        except HTTPException as exc:
+            logger.warning("Saved to Postgres but Google Sheet write-back failed: %s", exc.detail)
+
+    return QuantityUpdateResponse(item_id=item_id, quantity=row["quantity"], total_value=row["total_value"])
+
+
 @app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse)
 def update_item_quantity(item_id: str, payload: QuantityUpdateRequest):
+    if db.enabled():
+        return update_quantity_in_db(item_id, payload.quantity)
     return update_sheet_quantity(item_id=item_id, quantity=payload.quantity)
