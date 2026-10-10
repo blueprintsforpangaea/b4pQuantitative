@@ -5,7 +5,9 @@ from typing import Any, Dict, List, Optional
 import psycopg
 from psycopg.rows import dict_row
 
-Error = psycopg.Error  # what callers catch for 'database unavailable'
+Error = psycopg.Error
+NoDataFound = psycopg.errors.NoDataFound  # set_item_quantity: unknown or removed item
+OperationalError = psycopg.OperationalError  # connection-level failures  # what callers catch for 'database unavailable'
 
 
 def enabled() -> bool:
@@ -30,9 +32,13 @@ def fetch_items() -> List[Dict[str, Any]]:
 
 
 def set_quantity(item_id: str, quantity: int) -> Optional[Dict[str, Any]]:
-    """Call set_item_quantity(); returns {id, quantity, total_value} or None if no such item."""
+    """Call set_item_quantity(); returns {id, quantity, total_value, sheet_row, name, image_url} or None if no such item."""
     with _connect() as conn:
-        return conn.execute("SELECT * FROM set_item_quantity(%s, %s)", (item_id, quantity)).fetchone()
+        row = conn.execute("SELECT * FROM set_item_quantity(%s, %s)", (item_id, quantity)).fetchone()
+        if row:
+            # look up by the id the function returned (callers may pass ' 5 ' or '05')
+            row.update(conn.execute("SELECT name, image_url FROM dash_items WHERE id = %s", (row["id"],)).fetchone())
+        return row
 
 
 def ping() -> None:

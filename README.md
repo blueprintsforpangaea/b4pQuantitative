@@ -54,6 +54,16 @@ With `DATABASE_URL` set:
 
 - `GET /items` reads the `dash_items` view; `GET /kpis` is computed from the same items.
 - `POST /items/{id}/quantity` calls `set_item_quantity()` in the database, then also updates the Google Sheet if sheet credentials are configured, so the sheet stays consistent. A failed sheet write is logged as a warning; the database change is kept.
-- If the database cannot be reached (5 second timeout), reads fall back to the Google Sheet and log a warning; quantity updates return 503.
+- If the database cannot be reached (5 second timeout), reads and updates return 503 (no silent fallback: the sheet has different rows).
+- Sheet write-back goes to the "Final Inventorying" tab (`INVENTORY_WORKSHEET_GID`, default `1019735220`) at the row `set_item_quantity()` returns. It is skipped, with a logged warning, if that row's Image URL no longer matches the item.
 - Every `/items` and `/kpis` response has an `X-Data-Source: postgres|sheet` header showing which source served it.
 - `GET /health` returns `{"source": "postgres"|"sheet", "ok": true|false}`.
+
+### Security settings
+
+| Variable | Purpose |
+| --- | --- |
+| `ALLOWED_ORIGINS` | Comma-separated CORS allow-list. Default: `https://b4p-quantitative.vercel.app,http://localhost:5173`. |
+| `ADMIN_TOKEN` | Required to edit quantities. `POST /items/{id}/quantity` requires an `X-Admin-Token` header with this value; if it is unset or blank, the endpoint returns 403 (editing disabled). (The dashboard UI has no quantity editor yet; send the header from whatever tool calls this endpoint.) |
+
+Quantities must be between 0 and 999,999.

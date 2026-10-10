@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import requests
 import csv
 import re
 import os
+import hmac
 import json
 import logging
 from io import StringIO
@@ -29,10 +30,13 @@ app = FastAPI(title="Inventory Backend API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        o.strip()
+        for o in os.getenv("ALLOWED_ORIGINS", "https://b4p-quantitative.vercel.app,http://localhost:5173").split(",")
+        if o.strip()
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Admin-Token"],
 )
 
 # ==============================
@@ -118,7 +122,7 @@ class KPIResponse(BaseModel):
 
 
 class QuantityUpdateRequest(BaseModel):
-    quantity: int
+    quantity: int = Field(ge=0, lt=1_000_000)
 
 
 class QuantityUpdateResponse(BaseModel):
@@ -217,7 +221,7 @@ def normalize_item_id(row: Dict[str, Any], fallback_index: int) -> str:
     return str(fallback_index)
 
 
-def get_gspread_worksheet():
+def get_gspread_worksheet(gid: str = SHEET_GID):
     if gspread is None or Credentials is None:
         raise HTTPException(
             status_code=503,
@@ -249,10 +253,10 @@ def get_gspread_worksheet():
         client = gspread.authorize(credentials)
         spreadsheet = client.open_by_key(SHEET_ID)
         try:
-            return spreadsheet.get_worksheet_by_id(int(SHEET_GID))
+            return spreadsheet.get_worksheet_by_id(int(gid))
         except AttributeError:
             for worksheet in spreadsheet.worksheets():
-                if str(worksheet.id) == str(SHEET_GID):
+                if str(worksheet.id) == str(gid):
                     return worksheet
             raise HTTPException(status_code=500, detail="Configured worksheet could not be found.")
     except HTTPException:
@@ -382,17 +386,18 @@ def fetch_items_from_db() -> List[Item]:
 
 
 def load_items(response: Response) -> List[Item]:
-    """Postgres if DATABASE_URL is set (sheet fallback if unreachable), else the sheet.
+    """Postgres if DATABASE_URL is set (503 if it is down), else the sheet.
 
     The source that served the request is reported in the X-Data-Source header.
     """
     if db.enabled():
         try:
             items = fetch_items_from_db()
-            response.headers["X-Data-Source"] = "postgres"
-            return items
         except db.Error as exc:
-            logger.warning("Postgres unavailable, falling back to Google Sheet: %s", exc)
+            logger.error("Postgres read failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+        response.headers["X-Data-Source"] = "postgres"
+        return items
     response.headers["X-Data-Source"] = "sheet"
     return fetch_items_from_sheet()
 
@@ -447,7 +452,7 @@ def calculate_kpis(response: Response):
         avg_duration = 0.0
 
     pallets = len(set(i.pallet_number for i in items_db))
-    boxes = len(set((i.category_box, i.box_number) for i in items_db))
+    boxes = len(set((i.pallet_number, i.category_box, i.box_number) for i in items_db))
 
     # ==============================
     # EXPIRY CALCULATIONS
@@ -512,27 +517,57 @@ def calculate_kpis(response: Response):
     )
 
 
+def write_back_to_inventory_tab(row: Dict[str, Any], quantity: int) -> None:
+    """Mirror a DB quantity edit into the sheet row it came from (best effort, never raises)."""
+    try:
+        gid = os.getenv("INVENTORY_WORKSHEET_GID", "1019735220")
+        worksheet = get_gspread_worksheet(gid)
+        headers = [str(h or "").strip().lower() for h in worksheet.row_values(1)]
+        cells = worksheet.row_values(row["sheet_row"])
+        cell = lambda name: cells[headers.index(name)] if name in headers and headers.index(name) < len(cells) else ""
+        # Rows may have shifted since the last sync: only write if this is the same product.
+        image = (row["image_url"] or "").strip()
+        same_name = cell("name").strip().lower() == (row["name"] or "").strip().lower()
+        if not image or cell("image url").strip() != image or not same_name:
+            logger.warning("Sheet row %s does not match item %s (blank/different image URL or name); skipped write-back.", row["sheet_row"], row["id"])
+            return
+        if "quantity" not in headers:
+            logger.warning("Sheet tab has no Quantity column; skipped write-back.")
+            return
+        worksheet.update_cell(row["sheet_row"], headers.index("quantity") + 1, quantity)
+    except Exception as exc:  # DB change is already saved; the sheet is best effort
+        logger.warning("Saved to Postgres but Google Sheet write-back failed: %s", getattr(exc, "detail", exc))
+
+
 def update_quantity_in_db(item_id: str, quantity: int) -> QuantityUpdateResponse:
-    if quantity <= 0:
-        raise HTTPException(status_code=400, detail="Quantity must be greater than 0.")
     try:
         row = db.set_quantity(item_id, quantity)
+    except db.OperationalError as exc:
+        logger.error("Postgres unavailable on quantity update: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    except db.NoDataFound as exc:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} was not found.") from exc
     except db.Error as exc:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+        logger.warning("Postgres rejected quantity update for %s: %s", item_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid quantity.") from exc
     if row is None:
         raise HTTPException(status_code=404, detail=f"Item {item_id} was not found.")
 
-    # Keep the sheet (the inventorying app's hub) consistent when credentials exist.
     if sheet_write_configured():
-        try:
-            update_sheet_quantity(item_id=item_id, quantity=quantity)
-        except HTTPException as exc:
-            logger.warning("Saved to Postgres but Google Sheet write-back failed: %s", exc.detail)
+        write_back_to_inventory_tab(row, quantity)
 
-    return QuantityUpdateResponse(item_id=item_id, quantity=row["quantity"], total_value=row["total_value"])
+    return QuantityUpdateResponse(item_id=row["id"], quantity=row["quantity"], total_value=row["total_value"])
 
 
-@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse)
+def require_admin(x_admin_token: Optional[str] = Header(None)):
+    token = (os.getenv("ADMIN_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(status_code=403, detail="Quantity editing is disabled (ADMIN_TOKEN not set).")
+    if not hmac.compare_digest((x_admin_token or "").encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="Admin token required.")
+
+
+@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse, dependencies=[Depends(require_admin)])
 def update_item_quantity(item_id: str, payload: QuantityUpdateRequest):
     if db.enabled():
         return update_quantity_in_db(item_id, payload.quantity)

@@ -31,9 +31,11 @@ def no_sheet_writes(monkeypatch):
     monkeypatch.delenv("GOOGLE_SHEETS_CREDENTIALS_PATH", raising=False)
     monkeypatch.delenv("GOOGLE_SHEETS_CREDENTIALS_JSON", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("ADMIN_TOKEN", "test-token")
 
 
-client = TestClient(appmod.app)
+client = TestClient(appmod.app, headers={"X-Admin-Token": "test-token"})
+anon = TestClient(appmod.app)
 
 
 FEED = "https://b4p-external-view-w26-backend.onrender.com/api/supplies"
@@ -157,19 +159,60 @@ def test_kpis_match(db_mode, monkeypatch, sheet_csv):
     assert d["expiry_ranges"].keys() == s["expiry_ranges"].keys()
 
 
-def test_db_unreachable_falls_back_to_sheet(monkeypatch, caplog, sheet_csv):
-    monkeypatch.setattr(appmod.requests, "get", lambda *a, **k: _Resp(sheet_csv))
+def test_db_unreachable_is_503_no_fallback(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://127.0.0.1:1/nope?connect_timeout=2")
-    r = client.get("/items")
-    assert "falling back" in caplog.text
-    assert r.status_code == 200
-    assert r.headers["x-data-source"] == "sheet"
+    for path in ("/items", "/kpis"):
+        r = client.get(path)
+        assert r.status_code == 503 and r.json()["detail"] == "Database unavailable."
     assert client.get("/health").json() == {"source": "postgres", "ok": False}
 
 
 def test_quantity_update_503_when_db_down(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://127.0.0.1:1/nope")
-    assert client.post("/items/x/quantity", json={"quantity": 3}).status_code == 503
+    r = client.post("/items/x/quantity", json={"quantity": 3})
+    assert r.status_code == 503 and "127.0.0.1" not in r.text
+
+
+def test_quantity_range_validated():
+    for q in (-1, 1_000_000, 99999999999):
+        assert client.post("/items/1/quantity", json={"quantity": q}).status_code == 422
+
+
+def test_cors_allow_list():
+    h = {"Access-Control-Request-Method": "POST"}
+    bad = client.options("/items/1/quantity", headers={**h, "Origin": "https://evil.test"})
+    assert "access-control-allow-origin" not in bad.headers
+    ok = client.options("/items/1/quantity", headers={**h, "Origin": "http://localhost:5173"})
+    assert ok.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "access-control-allow-credentials" not in ok.headers
+
+
+def test_admin_token(monkeypatch):
+    monkeypatch.setenv("ADMIN_TOKEN", "s3cret")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://127.0.0.1:1/nope")  # past auth -> 503
+    assert anon.post("/items/1/quantity", json={"quantity": 1}).status_code == 401
+    assert anon.post("/items/1/quantity", json={"quantity": 1}, headers={"X-Admin-Token": "bad"}).status_code == 401
+    assert anon.post("/items/1/quantity", json={"quantity": 1}, headers={"X-Admin-Token": "s3cret"}).status_code == 503
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_fails_closed_without_admin_token(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("ADMIN_TOKEN")
+    else:
+        monkeypatch.setenv("ADMIN_TOKEN", value)
+    r = anon.post("/items/1/quantity", json={"quantity": 1})
+    assert r.status_code == 403 and "ADMIN_TOKEN not set" in r.text
+
+
+def test_box_count_includes_pallet(monkeypatch):
+    def item(p, c, b):
+        return appmod.Item(id="x", name="n", gen_name="", category="Gloves", manufacturer="m", quantity=1,
+                           unit_value=0, total_value=0, warehouse_date="2026-01-01",
+                           pallet_number=p, category_box=c, box_number=b)
+
+    monkeypatch.setattr(appmod, "fetch_items_from_sheet", lambda: [item(1, "A", 1), item(2, "A", 1)])
+    assert client.get("/kpis").json()["box_count"] == 2
 
 
 @needs_db
@@ -190,5 +233,84 @@ def test_quantity_update_on_copy(copy_db):
 
 @needs_db
 def test_quantity_update_errors(copy_db):
-    assert client.post("/items/x/quantity", json={"quantity": 0}).status_code == 400
+    assert client.post("/items/NO-SUCH-ID/quantity", json={"quantity": 0}).status_code == 404
     assert client.post("/items/NO-SUCH-ID/quantity", json={"quantity": 2}).status_code == 404
+
+
+@needs_db
+def test_quantity_zero_allowed(copy_db):
+    r = client.post("/items/1/quantity", json={"quantity": 0})
+    assert r.status_code == 200 and r.json()["quantity"] == 0
+
+
+@needs_db
+def test_constraint_error_is_400_and_not_leaked(copy_db):
+    # bypass pydantic to hit the DB function's own validation
+    from backend import db
+    with pytest.raises(db.Error):
+        db.set_quantity("1", -5)
+    r = client.post("/items/1/quantity", json={"quantity": 999_999})
+    assert r.status_code in (200, 400)
+    assert "postgres" not in r.text.lower() and "DETAIL" not in r.text
+
+
+class FakeWS:
+    """Stands in for the 'Final Inventorying' tab, built from the DB copy."""
+
+    def __init__(self, rows):
+        self.rows, self.writes = rows, []
+
+    def row_values(self, n):
+        return ["Name", "Quantity", "Image URL"] if n == 1 else self.rows.get(n, [])
+
+    def update_cell(self, r, c, v):
+        self.writes.append((r, c, v))
+
+
+@needs_db
+def test_writeback_targets_sheet_row_with_image_check(copy_db, monkeypatch):
+    """Regression: write-back must hit the item's own row in the inventory tab, never another product."""
+    monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON", "{}")
+    items = client.get("/items").json()
+    import json as _json
+    info = _json.loads(subprocess.run(["psql", TEST_DB, "-Atc", "select json_agg(json_build_object('id',id,'sheet_row',sheet_row)) from dash_items"],
+                                      capture_output=True, text=True).stdout)
+    rows_by_id = {r["id"]: r["sheet_row"] for r in info}
+    target = next(i for i in items if i["image_url"])
+    sheet_row = rows_by_id[target["id"]]
+    ws = FakeWS({sheet_row: [target["name"], "1", target["image_url"]]})
+    seen = {}
+    monkeypatch.setattr(appmod, "get_gspread_worksheet", lambda gid="x": seen.setdefault("gid", gid) and ws)
+    r = client.post(f"/items/{target['id']}/quantity", json={"quantity": 4})
+    assert r.status_code == 200
+    assert seen["gid"] == "1019735220"
+    assert ws.writes == [(sheet_row, 2, 4)]
+
+    ws.writes.clear()  # rows shifted: image URL no longer matches -> skip
+    ws.rows[sheet_row] = ["Other product", "9", "https://example.test/other.png"]
+    assert client.post(f"/items/{target['id']}/quantity", json={"quantity": 5}).status_code == 200
+    assert ws.writes == []
+
+
+@needs_db
+@pytest.mark.parametrize("pid", ["%205%20", "05"])
+def test_id_variants_do_not_500(copy_db, pid):
+    r = client.post(f"/items/{pid}/quantity", json={"quantity": 4})
+    assert r.status_code in (200, 404), r.text
+
+
+@needs_db
+@pytest.mark.parametrize("db_image,sheet_name,sheet_image", [
+    (None, "SAME", ""),                      # both URLs blank
+    ("https://x.test/a.png", "Other", "https://x.test/a.png"),  # same image, different name
+])
+def test_writeback_skipped_on_weak_match(copy_db, monkeypatch, db_image, sheet_name, sheet_image):
+    monkeypatch.setenv("GOOGLE_SHEETS_CREDENTIALS_JSON", "{}")
+    subprocess.run(["psql", TEST_DB, "-qc", "update inventory_item set image_url = %s where item_id = 1" % ("NULL" if db_image is None else f"'{db_image}'")], check=True)
+    item = next(i for i in client.get("/items").json() if i["id"] == "1")
+    row = subprocess.run(["psql", TEST_DB, "-Atc", "select sheet_row from dash_items where id='1'"], capture_output=True, text=True).stdout.strip()
+    name = item["name"] if sheet_name == "SAME" else sheet_name
+    ws = FakeWS({int(row): [name, "1", sheet_image]})
+    monkeypatch.setattr(appmod, "get_gspread_worksheet", lambda gid="x": ws)
+    assert client.post("/items/1/quantity", json={"quantity": 3}).status_code == 200
+    assert ws.writes == []
