@@ -99,3 +99,7 @@ The Requests tab shows requester emails and can change request status, so it is 
 ## Frontend tests
 
 `cd frontend && npm test` runs the component tests (vitest, jsdom, Testing Library) for the Stock Alerts, Requests and header sync cell: loading, empty, error and data states and the "Price unknown" logic. Backend tests: `python -m pytest backend/tests`.
+
+## Smoke test
+
+`DATABASE_URL=postgresql:///b4p_v2 .venv/bin/python scripts/smoke.py` starts the backend on a free port against that local database (it refuses any remote host), calls every endpoint (items, kpis, stock-alerts, both CSVs, sync-status, requests with and without the admin token, and 401/404/400 status cases), prints PASS/FAIL per check, stops the server and exits non-zero on any failure. It is read-only and never writes to the Google Sheet.
