@@ -852,3 +852,29 @@ def test_requests_endpoint_and_packing_list_use_real_item_id(copy_db):
     hdr = rows[0]
     assert rows[1][hdr.index("Match")] == "In stock (requested item)" and rows[1][hdr.index("Supply ID")] == iid
     assert rows[1][hdr.index("Inventory name")] == name
+
+
+# ---- an Item ID that contradicts the [Lot, Box, Pallet] suffix must not win silently ----
+def test_item_id_conflicting_with_requested_lot_falls_back_to_name_matching():
+    from backend.exports import add_stock_warnings, id_conflict, packing_list_csv, parse_requested_name
+    items = [_inv("1", "Gauze 4x4", qty=5, lot_number="A", pallet_number=1, box_number=1),
+             _inv("2", "Gauze 4x4", qty=5, lot_number="B", pallet_number=1, box_number=1, expiration_date="2027-01-01"),
+             _inv("3", "Syringe", qty=5, lot_number=None, pallet_number=0, box_number=0)]
+    want = lambda raw: parse_requested_name(raw)
+    assert id_conflict(want("Gauze 4x4 [Lot B, Box 1, Pallet 1]"), items[0]) == "Item ID points to a different lot than requested; check"
+    assert id_conflict(want("Gauze 4x4 [Lot a, Box 1, Pallet 1]"), items[0]) == ""            # same lot, case ignored
+    assert id_conflict(want("Gauze 4x4 [Lot A, Box 9, Pallet 1]"), items[0]).endswith("box or pallet than requested; check")
+    assert id_conflict(want("Syringe [Lot Z, Box 9, Pallet 9]"), items[2]) == ""               # nothing known on the row: no contradiction
+    assert id_conflict(want("Gauze 4x4"), items[0]) == ""                                       # no suffix: nothing to contradict
+    line = lambda name, ref: {"item_name": name, "category": "", "quantity": 1, "item_id": ref}
+    req = {"request_id": "R", "org_name": "O", "status": "Under Review", "items": [
+        line("Gauze 4x4 [Lot B, Box 1, Pallet 1]", "1"),    # id says lot A, name says lot B
+        line("Gauze 4x4 [Lot A, Box 1, Pallet 1]", "1")]}   # agrees: the id wins
+    rows = _rows(packing_list_csv(req, items))
+    hdr = rows[0]
+    first, second = rows[1], rows[3]  # line 1 lists two name-matched rows (lot B first, then lot A); line 2 follows
+    assert first[hdr.index("Match")].endswith("Item ID points to a different lot than requested; check")
+    assert first[hdr.index("Supply ID")] == "2" and first[hdr.index("Lot")] == "B"  # fell back to name matching, lot B row first
+    assert second[hdr.index("Match")] == "In stock (requested item)" and second[hdr.index("Supply ID")] == "1"
+    add_stock_warnings([req], items)
+    assert req["id_conflicts"] == [{"item_name": "Gauze 4x4", "message": "Item ID points to a different lot than requested; check"}]

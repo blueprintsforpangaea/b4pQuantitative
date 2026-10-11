@@ -133,6 +133,13 @@ describe("Requests", () => {
     expect(screen.getByText("Could be several inventory items; check the name: Tape (Tape roll; Tape strip)")).toBeTruthy();
   });
 
+  it("flags an Item ID that contradicts the requested lot", async () => {
+    sessionStorage.setItem("b4p-admin-token", "t");
+    fetch.mockReturnValue(json({ ...data, requests: [{ ...data.requests[0], id_conflicts: [{ item_name: "Gauze", message: "Item ID points to a different lot than requested; check" }] }] }));
+    render(<Requests />);
+    expect(await screen.findByText("Item ID points to a different lot than requested; check: Gauze")).toBeTruthy();
+  });
+
   it("notes items that left the inventory", async () => {
     sessionStorage.setItem("b4p-admin-token", "t");
     fetch.mockReturnValue(json({ ...data, requests: [{ ...data.requests[0], removed: ["Gauze"] }] }));

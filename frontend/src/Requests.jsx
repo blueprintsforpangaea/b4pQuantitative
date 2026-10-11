@@ -129,6 +129,11 @@ export default function Requests() {
                         {r.status === "Approved" ? "Approved requests commit" : "Approving this would commit"} {w.committed} of {w.in_stock} in stock{w.match === "approximate" ? " (approximate match)" : ""}: {w.item_name}
                       </p>
                     ))}
+                    {(r.id_conflicts || []).map((c) => (
+                      <p key={`x-${c.item_name}`} className="stock-warning" style={{ color: "#8a4b00", margin: "6px 0 0" }}>
+                        {c.message}: {c.item_name}
+                      </p>
+                    ))}
                     {(r.removed || []).map((name) => (
                       <p key={`g-${name}`} className="stock-note" style={{ color: "#6b6b6b", margin: "6px 0 0" }}>
                         No longer in stock (removed from the inventory sheet): {name}

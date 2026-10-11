@@ -95,6 +95,21 @@ def _products(items: List[Any]) -> Dict[str, frozenset]:
     return {k: significant_tokens(k) for k in {_norm(i.name) for i in items}}
 
 
+def id_conflict(want: Dict[str, Any], picked: Any) -> str:
+    """Why the stored Item ID's row disagrees with the [Lot, Box, Pallet] in the requested name ('' if it doesn't).
+
+    Only values both sides know are compared: a row with no lot recorded, or an unknown (0) box or
+    pallet, cannot contradict the request.
+    """
+    lot = getattr(picked, "lot_number", None)
+    if want["lot"] and lot and lot.casefold() != want["lot"].casefold():
+        return "Item ID points to a different lot than requested; check"
+    if (want["box"] is not None and picked.box_number > 0 and picked.box_number != want["box"]) or \
+            (want["pallet"] is not None and picked.pallet_number > 0 and picked.pallet_number != want["pallet"]):
+        return "Item ID points to a different box or pallet than requested; check"
+    return ""
+
+
 def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
     """One row per (requested line, matching inventory row).
 
@@ -129,19 +144,23 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
             return any(asked) and score(i) == sum(asked)
 
         ref = line.get("item_id") or ""
-        if ref:  # the requester picked an exact inventory row: no name matching
-            picked = by_id.get(ref)
+        picked = by_id.get(ref) if ref else None
+        conflict = id_conflict(want, picked) if picked is not None else ""
+        if ref and not conflict:  # the requester picked an exact inventory row: no name matching
             kind = "id" if picked is not None and picked.quantity > 0 else ("out" if picked is not None else "gone")
             keys = []
             matches = [picked] if kind == "id" else []
-        else:
+        else:  # no id, or the id's row contradicts the lot/box/pallet in the name: match by name instead
             kind, keys = find_match(want["name"], products)
             ranked = lambda k: sorted(by_name[k], key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
             # exact/approximate: several rows of the one product; candidates: the best row of each tied product
             matches = ranked(keys[0])[:MAX_MATCHES_PER_LINE] if kind in ("exact", "approximate") else [ranked(k)[0] for k in keys[:MAX_MATCHES_PER_LINE]]
         label = {"id": "In stock (requested item)", "exact": "In stock", "approximate": "Approximate match", "candidates": "Approximate match - candidate"}.get(kind)
+        if conflict:
+            label = f"{label or 'Not found in stock'} - {conflict}"
         if not matches:
             missing = {"out": "None on hand", "gone": "No longer in stock"}.get(kind, "Not found in stock")
+            missing = f"{missing} - {conflict}" if conflict else missing
             rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], missing, ref, "", "", "", "", "", *extra, "", "", picked.name if ref and picked else ""])
         for m in matches:
             rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], label, m.id,
@@ -177,7 +196,11 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
         raw, ref = line["item_name"], line.get("item_id") or ""
         if ref:
             picked = by_id.get(ref)
-            return ("id", [_norm(picked.name)]) if picked is not None else ("gone", [])
+            if picked is None:
+                return "gone", []
+            if not id_conflict(parse_requested_name(raw), picked):
+                return "id", [_norm(picked.name)]
+            # contradicts the lot/box/pallet in the name: fall through to name matching (and the request gets a note)
         if raw not in resolved:
             resolved[raw] = find_match(parse_requested_name(raw)["name"], products)
         return resolved[raw]
@@ -190,13 +213,16 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
                 if kind in ("id", "exact", "approximate"):
                     approved[keys[0]] = approved.get(keys[0], 0) + line["quantity"]
     for r in requests:
-        warnings, unmatched, candidates, removed = [], [], [], []
+        warnings, unmatched, candidates, removed, id_conflicts = [], [], [], [], []
         if r["status"] in ("Under Review", "Approved"):
             this: Dict[str, int] = {}
             kinds: Dict[str, str] = {}
             for line in r["items"]:
                 kind, keys = resolve(line)
                 name = parse_requested_name(line["item_name"])["name"]
+                picked = by_id.get(line.get("item_id") or "")
+                if picked is not None and id_conflict(parse_requested_name(line["item_name"]), picked):
+                    id_conflicts.append({"item_name": name, "message": id_conflict(parse_requested_name(line["item_name"]), picked)})
                 if kind == "gone":
                     removed.append(name)
                 elif kind == "none":
@@ -212,4 +238,4 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
                 committed, in_stock = others + qty, stock.get(k, 0)
                 if committed > in_stock:
                     warnings.append({"item_name": shown[k], "committed": committed, "in_stock": in_stock, "match": kinds[k]})
-        r["warnings"], r["unmatched"], r["candidates"], r["removed"] = warnings, unmatched, candidates, removed
+        r["warnings"], r["unmatched"], r["candidates"], r["removed"], r["id_conflicts"] = warnings, unmatched, candidates, removed, id_conflicts
