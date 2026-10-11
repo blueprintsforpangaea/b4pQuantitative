@@ -314,3 +314,45 @@ def test_writeback_skipped_on_weak_match(copy_db, monkeypatch, db_image, sheet_n
     monkeypatch.setattr(appmod, "get_gspread_worksheet", lambda gid="x": ws)
     assert client.post("/items/1/quantity", json={"quantity": 3}).status_code == 200
     assert ws.writes == []
+
+
+# ---- stock alerts ----
+from datetime import date, timedelta
+
+from backend.alerts import build_alerts
+
+
+def _it(id, qty, exp, value=0.0):
+    return appmod.Item(id=id, name=f"n{id}", gen_name="", category="Gloves", manufacturer="x", quantity=qty,
+                       unit_value=0, total_value=value, expiration_date=exp, warehouse_date="2026-01-01",
+                       pallet_number=1, category_box="A", box_number=1)
+
+
+def test_alert_buckets_and_boundaries():
+    t = date(2026, 10, 11)
+    d = lambda n: (t + timedelta(days=n)).isoformat()
+    items = [_it("a", 9, d(0)), _it("b", 9, d(-5)), _it("c", 9, d(1)), _it("d", 9, d(90)), _it("e", 9, d(91)),
+             _it("f", 9, None), _it("g", 3, d(400)), _it("h", 0, None)]
+    r = build_alerts(items, soon_days=90, low_stock=3, today=t)
+    assert [x["id"] for x in r["expired"]] == ["b", "a"]  # expiring today counts as expired, most overdue first
+    assert [x["id"] for x in r["expiring_soon"]] == ["c", "d"]
+    assert [x["id"] for x in r["low_stock_items"]] == ["h", "g"]
+    assert r["summary"]["expired"] == {"entries": 2, "units": 18, "value": 0.0}
+
+
+@needs_db
+def test_alerts_endpoint_matches_sql(db_mode):
+    r = client.get("/stock-alerts?soon_days=90&low_stock=3")
+    assert r.status_code == 200 and r.headers["x-data-source"] == "postgres"
+    body = r.json()
+    q = lambda sql: subprocess.run(["psql", SRC_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
+    assert str(body["summary"]["expired"]["entries"]) == q("select count(*) from dash_items where expiration_date <= current_date::text")
+    assert str(body["summary"]["expiring_soon"]["entries"]) == q(
+        "select count(*) from dash_items where expiration_date > current_date::text and expiration_date <= (current_date+90)::text")
+    assert str(body["summary"]["low_stock"]["entries"]) == q("select count(*) from dash_items where quantity <= 3")
+    assert client.get("/stock-alerts?soon_days=0").status_code == 422
+
+
+def test_alerts_503_when_db_down(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/none")
+    assert client.get("/stock-alerts").status_code == 503

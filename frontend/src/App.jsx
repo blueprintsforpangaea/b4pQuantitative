@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import StockAlerts from "./StockAlerts.jsx";
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const SHIPMENT_STORAGE_KEY = "blueprints-current-shipments";
 const NON_INVENTORY_SHIPMENT_STORAGE_KEY = "blueprints-non-inventory-shipments";
@@ -178,6 +180,7 @@ function applyDashboardTooltips(root = document) {
 const tabs = [
   { id: "inventory", label: "Total Inventory" },
   { id: "kpis", label: "Inventory KPIs" },
+  { id: "stock-alerts", label: "Stock Alerts" },
   { id: "shipments", label: "Shipments" },
   { id: "shipment-kpis", label: "Shipment KPIs" },
 ];
@@ -380,6 +383,7 @@ function formatNumber(value) {
 }
 
 function formatCurrency(value) {
+  if (!value) return "Price unknown";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -4094,6 +4098,8 @@ export default function App() {
           </div>
         </section>
       ) : null}
+
+      {!loading && !error && activeTab === "stock-alerts" ? <StockAlerts /> : null}
 
       {!loading && !error && activeTab === "kpis" ? (
         <section className="panel">

@@ -1,4 +1,4 @@
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
@@ -21,8 +21,10 @@ except ImportError:  # pragma: no cover - optional until credentials are configu
 
 try:
     from . import db
+    from .alerts import build_alerts
 except ImportError:  # run as `uvicorn app:app` from inside backend/
     import db
+    from alerts import build_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -428,6 +430,15 @@ def health():
 @app.get("/items", response_model=List[Item])
 def get_items(response: Response):
     return load_items(response)
+
+
+@app.get("/stock-alerts")
+def stock_alerts(
+    response: Response,
+    soon_days: int = Query(90, ge=1, le=3650),
+    low_stock: int = Query(3, ge=0, le=1_000_000),
+):
+    return build_alerts(load_items(response), soon_days=soon_days, low_stock=low_stock)
 
 
 @app.get("/kpis", response_model=KPIResponse)
