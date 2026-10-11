@@ -4,7 +4,7 @@ import { downloadCsv } from "./download.js";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
 // "Price unknown" depends on whether a unit price exists, not on the total (a zero-quantity row is $0 but priced).
-const money = (total, priced) =>
+export const money = (total, priced) =>
   priced ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(total) : "Price unknown";
 
 function dueLabel(days) {
@@ -25,18 +25,18 @@ function AlertTable({ title, rows, empty, showDays }) {
         </div>
       </div>
       {rows.length === 0 ? (
-        <p className="empty-state">{empty}</p>
+        <p className="empty-state" role="status">{empty}</p>
       ) : (
         <div className="shipment-kpi-table-wrap" style={{ overflowX: "auto" }}>
-          <table className="shipment-kpi-table">
+          <table className="shipment-kpi-table" aria-label={title}>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Supply</th>
-                <th>{showDays ? "Expiration" : "Quantity"}</th>
-                <th>{showDays ? "Quantity" : "Expiration"}</th>
-                <th>Location</th>
-                <th>Valuation</th>
+                <th scope="col">ID</th>
+                <th scope="col">Supply</th>
+                <th scope="col">{showDays ? "Expiration" : "Quantity"}</th>
+                <th scope="col">{showDays ? "Quantity" : "Expiration"}</th>
+                <th scope="col">Location</th>
+                <th scope="col">Valuation</th>
               </tr>
             </thead>
             <tbody>
@@ -85,8 +85,8 @@ export default function StockAlerts() {
     };
   }, [soonDays, lowStock]);
 
-  if (error) return <section className="panel error-panel">{error}</section>;
-  if (!data) return <section className="panel"><p className="empty-state">Loading stock alerts…</p></section>;
+  if (error) return <section className="panel error-panel" role="alert">{error}</section>;
+  if (!data) return <section className="panel" role="status" aria-live="polite"><p className="empty-state">Loading stock alerts…</p></section>;
   const s = data.summary;
   return (
     <section className="panel">
@@ -105,7 +105,7 @@ export default function StockAlerts() {
           <button type="button" className="secondary-button" onClick={() => { setDownloadError(""); downloadCsv(`/stock-alerts.csv?soon_days=${soonDays}`).catch((e) => setDownloadError(e.message)); }}>
             Download expiring CSV
           </button>
-          {downloadError ? <span role="alert" className="empty-state">{downloadError}</span> : null}
+          {downloadError ? <span role="alert" aria-live="assertive" className="empty-state">{downloadError}</span> : null}
           <label>
             Low stock at or below{" "}
             <select value={lowStock} onChange={(e) => setLowStock(Number(e.target.value))}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
-function ago(iso) {
+export function ago(iso) {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
   if (mins < 2) return "just now";
   if (mins < 120) return `${mins} min ago`;

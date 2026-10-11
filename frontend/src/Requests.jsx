@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { downloadCsv } from "./download.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
@@ -29,6 +29,7 @@ export default function Requests() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [filter, setFilter] = useState("Open");
+  const noticeRef = useRef(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -66,7 +67,9 @@ export default function Requests() {
     } else {
       setNotice(`${id} is now ${status}.`);
     }
-    load();
+    await load();
+    // The changed row may leave the current filter, so land focus on the result message instead.
+    noticeRef.current?.focus();
   }
 
   if (!token) {
@@ -81,15 +84,15 @@ export default function Requests() {
             setTokenInput("");
           }}
         >
-          <input type="password" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="Admin token" autoComplete="off" />{" "}
+          <input type="password" aria-label="Admin token" value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="Admin token" autoComplete="off" />{" "}
           <button type="submit" className="secondary-button" disabled={!tokenInput.trim()}>Unlock requests</button>
         </form>
-        {error ? <p className="empty-state">{error}</p> : null}
+        {error ? <p className="empty-state" role="alert">{error}</p> : null}
       </section>
     );
   }
-  if (error) return <section className="panel error-panel">{error} <button type="button" className="secondary-button" onClick={load}>Retry</button></section>;
-  if (!data) return <section className="panel"><p className="empty-state">Loading requests…</p></section>;
+  if (error) return <section className="panel error-panel" role="alert">{error} <button type="button" className="secondary-button" onClick={load}>Retry</button></section>;
+  if (!data) return <section className="panel" role="status" aria-live="polite"><p className="empty-state">Loading requests…</p></section>;
 
   const isOpen = (s) => s === "Under Review" || s === "Approved";
   const shown = data.requests.filter((r) => filter === "All" || (filter === "Open" ? isOpen(r.status) : r.status === filter));
@@ -101,7 +104,7 @@ export default function Requests() {
         <div><p className="section-label">Requests</p><h2>Partner supply requests</h2></div>
         <label>
           Show{" "}
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+          <select aria-label="Filter requests by status" value={filter} onChange={(e) => setFilter(e.target.value)}>
             {["Open", "All", ...data.statuses].map((s) => <option key={s}>{s}</option>)}
           </select>
         </label>
@@ -109,15 +112,15 @@ export default function Requests() {
       <div className="metrics-grid metrics-grid-primary">
         {counts.map(([s, n]) => <div className="metric-card" key={s}><p className="metric-label">{s}</p><p className="metric-value">{n}</p></div>)}
       </div>
-      {notice ? <p className="empty-state" role="status">{notice}</p> : null}
+      {notice ? <p className="empty-state" role="status" aria-live="polite" tabIndex={-1} ref={noticeRef}>{notice}</p> : null}
       {shown.length === 0 ? <p className="empty-state">No requests match this filter.</p> : (
         <div className="shipment-kpi-table-wrap" style={{ overflowX: "auto", maxHeight: "none" }}>
-          <table className="shipment-kpi-table">
-            <thead><tr><th>Request</th><th>Organization</th><th>Items</th><th>Submitted</th><th>Status</th><th>Change status</th><th>Packing list</th></tr></thead>
+          <table className="shipment-kpi-table" aria-label="Partner supply requests">
+            <thead><tr>{["Request", "Organization", "Items", "Submitted", "Status", "Change status", "Packing list"].map((h) => <th scope="col" key={h}>{h}</th>)}</tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.request_id}>
-                  <td>{r.request_id}{r.review_flag ? " (flagged)" : ""}</td>
+                  <th scope="row" style={{ fontWeight: "inherit", textAlign: "left" }}>{r.request_id}{r.review_flag ? " (flagged)" : ""}</th>
                   <td>{r.org_name}<br /><small>{r.org_email || "no email"}</small></td>
                   <td style={{ whiteSpace: "normal", minWidth: "260px" }}>{r.items.map((i) => `${i.quantity} x ${i.item_name}`).join("; ")}</td>
                   <td>{new Date(r.timestamp).toLocaleDateString()}</td>
@@ -131,7 +134,7 @@ export default function Requests() {
                     ) : "Final"}
                   </td>
                   <td>
-                    <button type="button" className="secondary-button" onClick={() => downloadCsv(`/requests/${encodeURIComponent(r.request_id)}/packing-list.csv`, token).catch((e) => setNotice(e.message))}>
+                    <button type="button" className="secondary-button" aria-label={`Download packing list for ${r.request_id}`} onClick={() => downloadCsv(`/requests/${encodeURIComponent(r.request_id)}/packing-list.csv`, token).catch((e) => setNotice(e.message))}>
                       CSV
                     </button>
                   </td>

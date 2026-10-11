@@ -95,3 +95,7 @@ The header shows when the inventory was last copied from the Google Sheet. If th
 ### Admin token setup (Requests tab and its CSVs)
 
 The Requests tab shows requester emails and can change request status, so it is locked. The server operator sets an environment variable named `ADMIN_TOKEN` on the backend (locally in the shell, on Vercel under Project Settings > Environment Variables) and shares the token with HQ staff privately. Staff type it once into the Requests tab; it is kept only for that browser session. Without `ADMIN_TOKEN` the Requests tab reports that it is disabled. The Requests tab also needs `DATABASE_URL` (the database connection) to be set. Never put the token's value in the repository.
+
+## Frontend tests
+
+`cd frontend && npm test` runs the component tests (vitest, jsdom, Testing Library) for the Stock Alerts, Requests and header sync cell: loading, empty, error and data states and the "Price unknown" logic. Backend tests: `python -m pytest backend/tests`.

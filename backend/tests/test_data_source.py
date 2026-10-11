@@ -602,7 +602,6 @@ def test_sync_status_refused_run_is_not_ok(copy_db):
     psql = lambda sql: subprocess.run(["psql", TEST_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
     assert client.get("/sync-status").json()["last_run_refused"] is False
     # simulate the view gaining the new column (older views simply lack it)
-    import types
     real = appmod.db.fetch_sync_status
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(appmod.db, "fetch_sync_status", lambda: {**real(), "last_run_ok": True, "last_run_refused": True})
