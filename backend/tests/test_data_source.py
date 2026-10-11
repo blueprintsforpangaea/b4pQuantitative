@@ -527,3 +527,54 @@ def test_alerts_skip_zero_quantity_and_flag_priced():
     assert [x["id"] for x in r["expired"]] == ["q"] and r["expiring_soon"] == []
     assert r["summary"]["expired"]["priced"] == 1
     assert [x["id"] for x in r["low_stock_items"]] == ["p", "s", "q"]  # low stock still lists zero-quantity rows
+
+
+# ---- CSV exports ----
+import csv as _csv
+
+
+def _rows(text):
+    return list(_csv.reader(io.StringIO(text)))
+
+
+def test_csv_formula_cells_are_neutralised():
+    from backend.exports import to_csv
+    out = _rows(to_csv(["a"], [["=HYPERLINK(\"http://x\")"], ["+1"], ["-1"], ["@x"], ["ok"], [5]]))
+    assert [r[0] for r in out[1:]] == ["'=HYPERLINK(\"http://x\")", "'+1", "'-1", "'@x", "ok", "5"]
+
+
+def test_packing_list_matches_by_name_earliest_expiry_first():
+    from backend.exports import packing_list_csv
+    named = lambda id, name, qty, exp: _it(id, qty, exp).model_copy(update={"name": name, "pallet_number": 2, "category_box": "ER", "box_number": int(id)})
+    items = [named("1", "Gauze", 5, "2030-01-01"), named("2", "gauze", 5, "2027-01-01"), named("3", "Gauze", 0, "2026-01-01"), named("4", "Saline", 9, None)]
+    req = {"request_id": "REQ-1", "org_name": "Clinic", "items": [
+        {"item_name": "GAUZE", "category": "", "quantity": 3}, {"item_name": "Tape", "category": "", "quantity": 1}]}
+    rows = _rows(packing_list_csv(req, items))
+    assert [r[5] for r in rows[1:3]] == ["2", "1"]  # earliest expiration first, out-of-stock row skipped
+    assert rows[1][8:10] == ["ER", "2"] and rows[1][7] == "2"
+    assert rows[3][4] == "Not found in stock" and len(rows) == 4
+
+
+def test_expiring_csv_endpoint_sheet_mode(monkeypatch):
+    t = date.today()
+    items = [_it("a", 2, (t - timedelta(days=2)).isoformat()), _it("b", 2, (t + timedelta(days=20)).isoformat()), _it("c", 2, (t + timedelta(days=200)).isoformat())]
+    monkeypatch.setattr(appmod, "load_items", lambda response: items)
+    r = client.get("/stock-alerts.csv?soon_days=30")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert "attachment" in r.headers["content-disposition"]
+    rows = _rows(r.text)
+    assert [(x[0], x[1]) for x in rows[1:]] == [("Expired", "a"), ("Expiring soon", "b")]
+
+
+@needs_db
+def test_packing_list_endpoint(copy_db):
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
+    name = psql("select name from dash_items where quantity > 0 limit 1").replace("'", "''")
+    psql(f"select create_request('Pack Org', 'p@example.org', jsonb_build_array(jsonb_build_object('item_name', '{name}', 'quantity', 2), jsonb_build_object('item_name', 'No such thing', 'quantity', 1)))")
+    rid = psql("select \"Request ID\" from dash_requests where \"Org Name\" = 'Pack Org' limit 1")
+    assert anon.get(f"/requests/{rid}/packing-list.csv").status_code == 401
+    r = client.get(f"/requests/{rid}/packing-list.csv")
+    assert r.status_code == 200
+    rows = _rows(r.text)
+    assert rows[0][0] == "Request" and any(x[4] == "In stock" for x in rows[1:]) and rows[-1][4] == "Not found in stock"
+    assert client.get("/requests/REQ-nope/packing-list.csv").status_code == 404

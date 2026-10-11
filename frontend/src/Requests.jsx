@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { downloadCsv } from "./download.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const TOKEN_KEY = "b4p-admin-token";
@@ -112,7 +113,7 @@ export default function Requests() {
       {shown.length === 0 ? <p className="empty-state">No requests match this filter.</p> : (
         <div className="shipment-kpi-table-wrap" style={{ overflowX: "auto", maxHeight: "none" }}>
           <table className="shipment-kpi-table">
-            <thead><tr><th>Request</th><th>Organization</th><th>Items</th><th>Submitted</th><th>Status</th><th>Change status</th></tr></thead>
+            <thead><tr><th>Request</th><th>Organization</th><th>Items</th><th>Submitted</th><th>Status</th><th>Change status</th><th>Packing list</th></tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.request_id}>
@@ -128,6 +129,11 @@ export default function Requests() {
                         {NEXT[r.status].map((s) => <option key={s}>{s}</option>)}
                       </select>
                     ) : "Final"}
+                  </td>
+                  <td>
+                    <button type="button" className="secondary-button" onClick={() => downloadCsv(`/requests/${encodeURIComponent(r.request_id)}/packing-list.csv`, token).catch((e) => setNotice(e.message))}>
+                      CSV
+                    </button>
                   </td>
                 </tr>
               ))}

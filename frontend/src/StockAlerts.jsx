@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { downloadCsv } from "./download.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -100,6 +101,9 @@ export default function StockAlerts() {
               {[30, 60, 90, 180, 365].map((n) => <option key={n} value={n}>{n} days</option>)}
             </select>
           </label>
+          <button type="button" className="secondary-button" onClick={() => downloadCsv(`/stock-alerts.csv?soon_days=${soonDays}`).catch((e) => setError(e.message))}>
+            Download expiring CSV
+          </button>
           <label>
             Low stock at or below{" "}
             <select value={lowStock} onChange={(e) => setLowStock(Number(e.target.value))}>

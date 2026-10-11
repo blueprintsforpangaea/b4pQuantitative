@@ -23,9 +23,11 @@ except ImportError:  # pragma: no cover - optional until credentials are configu
 try:
     from . import db
     from .alerts import build_alerts
+    from .exports import expiring_csv, packing_list_csv
 except ImportError:  # run as `uvicorn app:app` from inside backend/
     import db
     from alerts import build_alerts
+    from exports import expiring_csv, packing_list_csv
 
 logger = logging.getLogger(__name__)
 
@@ -470,6 +472,15 @@ def stock_alerts(
     return build_alerts(load_items(response), soon_days=soon_days, low_stock=low_stock)
 
 
+@app.get("/stock-alerts.csv")
+def stock_alerts_csv(response: Response, soon_days: int = Query(90, ge=1, le=3650)):
+    body = expiring_csv(build_alerts(load_items(response), soon_days=soon_days))
+    return Response(body, media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="expiring-within-{soon_days}-days.csv"',
+        "X-Data-Source": response.headers.get("X-Data-Source", ""),
+    })
+
+
 @app.get("/sync-status")
 def sync_status():
     """When the inventory was last copied from the sheet (database mode only)."""
@@ -674,6 +685,21 @@ def list_requests():
     except db.Error as exc:
         logger.error("Postgres read of requests failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+
+
+@app.get("/requests/{request_id}/packing-list.csv", dependencies=[Depends(require_admin), Depends(require_db)])
+def request_packing_list(request_id: str, response: Response):
+    try:
+        requests_ = group_request_lines(db.fetch_request_lines())
+    except db.Error as exc:
+        logger.error("Postgres read of requests failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    request = next((r for r in requests_ if r["request_id"] == request_id), None)
+    if request is None:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
+    body = packing_list_csv(request, load_items(response))
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", request_id)
+    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="packing-list-{safe_id}.csv"'})
 
 
 @app.post("/requests/{request_id}/status", dependencies=[Depends(require_admin), Depends(require_db)])
