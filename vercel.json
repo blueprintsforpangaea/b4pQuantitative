@@ -8,6 +8,7 @@
     { "src": "/kpis(.*)", "dest": "/api/index.py" },
     { "src": "/stock-alerts", "dest": "/api/index.py" },
     { "src": "/requests(.*)", "dest": "/api/index.py" },
+    { "src": "/sync-status", "dest": "/api/index.py" },
     { "src": "/health", "dest": "/api/index.py" },
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }

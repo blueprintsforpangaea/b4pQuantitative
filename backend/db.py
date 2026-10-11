@@ -56,3 +56,9 @@ def set_request_status(request_id: str, status: str) -> bool:
     """set_request_status(): False if the request does not exist. Raises db.Error for bad/forbidden changes."""
     with _connect() as conn:
         return conn.execute("SELECT set_request_status(%s, %s) AS ok", (request_id, status)).fetchone()["ok"]
+
+
+def fetch_sync_status() -> Dict[str, Any]:
+    """The single row of dash_sync_status."""
+    with _connect() as conn:
+        return conn.execute("SELECT * FROM dash_sync_status").fetchone()

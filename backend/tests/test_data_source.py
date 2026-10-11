@@ -455,3 +455,20 @@ def test_status_edit_drops_items_cache(copy_db, monkeypatch):
     client.get("/items")
     assert client.post(f"/requests/{rid}/status", json={"status": "Under Review"}).status_code == 409
     assert appmod._items_cache["items"] is not None
+
+
+# ---- sync status ----
+def test_sync_status_sheet_mode_and_db_down(monkeypatch):
+    assert client.get("/sync-status").json() == {"source": "sheet"}
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/none")
+    assert client.get("/sync-status").status_code == 503
+
+
+@needs_db
+def test_sync_status_matches_view(db_mode):
+    body = client.get("/sync-status").json()
+    q = lambda sql: subprocess.run(["psql", SRC_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
+    assert body["source"] == "postgres"
+    assert str(body["active_items"]) == q("select active_items from dash_sync_status")
+    assert (body["last_success_at"] is None) == (q("select last_success_at from dash_sync_status") == "")
+    assert body["last_run_ok"] is (q("select last_run_ok from dash_sync_status") == "t")

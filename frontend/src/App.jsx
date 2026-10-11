@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import StockAlerts from "./StockAlerts.jsx";
 import Requests from "./Requests.jsx";
+import SyncCell from "./SyncCell.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const SHIPMENT_STORAGE_KEY = "blueprints-current-shipments";
@@ -3628,10 +3629,7 @@ export default function App() {
               {loading || error ? "—" : formatNumber(totalUnitsOnHand)}
             </p>
           </div>
-          <div className="title-block-cell">
-            <p className="title-block-label">Sheet pulled</p>
-            <p className="title-block-value">{lastRefreshedLabel}</p>
-          </div>
+          <SyncCell fallbackLabel={lastRefreshedLabel} />
         </div>
         <div className="title-block-logo">
           <img

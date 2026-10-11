@@ -462,6 +462,27 @@ def stock_alerts(
     return build_alerts(load_items(response), soon_days=soon_days, low_stock=low_stock)
 
 
+@app.get("/sync-status")
+def sync_status():
+    """When the inventory was last copied from the sheet (database mode only)."""
+    if not db.enabled():
+        return {"source": "sheet"}
+    try:
+        row = db.fetch_sync_status()
+    except db.Error as exc:
+        logger.error("Postgres read of sync status failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    iso = lambda v: v.isoformat() if v else None
+    return {
+        "source": "postgres",
+        "last_success_at": iso(row["last_success_at"]),
+        "last_run_at": iso(row["last_run_at"]),
+        "last_run_ok": row["last_run_ok"],
+        "last_warning_count": row["last_warning_count"],
+        "active_items": row["active_items"],
+    }
+
+
 @app.get("/kpis", response_model=KPIResponse)
 def calculate_kpis(response: Response):
     items_db = load_items(response)
