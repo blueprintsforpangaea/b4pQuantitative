@@ -621,3 +621,32 @@ def test_sync_status_refused_run_real_column(copy_db):
     psql("insert into sync_run(started_at, finished_at, source) values (now(), now(), 'service-account:Final Inventorying')")
     ok = client.get("/sync-status").json()
     assert ok["last_run_refused"] is False and ok["last_run_ok"] is True and ok["last_success_at"] != before["last_success_at"]
+
+
+# ---- packing list: names from the external site carry a [Lot, Box, Pallet] suffix ----
+def test_parse_requested_name():
+    from backend.exports import parse_requested_name
+    assert parse_requested_name("Nitrile Gloves Medium [Lot L9, Box 1, Pallet 2]") == {"name": "Nitrile Gloves Medium", "lot": "L9", "box": 1, "pallet": 2}
+    assert parse_requested_name("Gauze")["name"] == "Gauze" and parse_requested_name("Gauze")["box"] is None
+    assert parse_requested_name("Tube [Lot A 1]")["lot"] == "A 1"
+    assert parse_requested_name("X [odd]")["name"] == "X"
+
+
+def test_packing_list_handles_suffix_case_and_whitespace():
+    from backend.exports import packing_list_csv
+    named = lambda id, name, qty, exp, pal, box: _it(id, qty, exp).model_copy(update={"name": name, "pallet_number": pal, "category_box": "ER", "box_number": box})
+    items = [named("1", "NITRILE GLOVES MEDIUM", 5, "2026-12-01", 1, 1),     # exact box/pallet, later expiry
+             named("2", "NITRILE GLOVES MEDIUM", 5, "2026-01-01", 2, 7),     # same name elsewhere, earlier expiry
+             named("3", "Nitrile  Gloves   Large", 5, None, 1, 1)]
+    req = {"request_id": "REQ-9", "org_name": "O", "items": [
+        {"item_name": "Nitrile Gloves Medium [Lot L9, Box 1, Pallet 1]", "category": "", "quantity": 2},
+        {"item_name": "nitrile gloves large", "category": "", "quantity": 1},
+        {"item_name": "Nitrile Gloves Small [Lot Z, Box 1, Pallet 1]", "category": "", "quantity": 1}]}
+    rows = _rows(packing_list_csv(req, items))
+    hdr = rows[0]
+    col = lambda r, name: r[hdr.index(name)]
+    assert [col(r, "Supply ID") for r in rows[1:3]] == ["1", "2"]  # requested box/pallet first, then the other stock
+    assert [col(r, "In requested box and pallet") for r in rows[1:3]] == ["Yes", "No"]
+    assert col(rows[1], "Requested lot") == "L9" and col(rows[1], "Requested box") == "1"
+    assert col(rows[3], "Match") == "In stock" and col(rows[3], "Supply ID") == "3"  # case and spacing ignored
+    assert col(rows[4], "Match") == "Not found in stock"

@@ -90,7 +90,7 @@ The header shows when the inventory was last copied from the Google Sheet. If th
 ### CSV exports
 
 - **Stock Alerts > Download expiring CSV:** expired items plus items expiring within the selected window, with location (pallet, box category, box number).
-- **Requests > CSV (per request):** a packing list. Each requested item is matched by exact name to items in stock, earliest expiration first, with pallet and box numbers. Items that are not found in stock are marked as such, so check those by hand. Requested names are typed by partners, so a near-miss spelling will not match.
+- **Requests > CSV (per request):** a packing list. Each requested item is matched by name (ignoring case, extra spaces and a trailing "[Lot ..., Box ..., Pallet ...]" that the partner site adds) to items in stock. Rows in the requested box and pallet come first, then the earliest expiration, with pallet and box numbers. The inventory has no lot numbers, so the requested lot is only shown for the packer. Items that are not found in stock are marked as such, so check those by hand. Requested names are typed by partners, so a spelling that differs by more than case and spacing will not match.
 
 ### Admin token setup (Requests tab and its CSVs)
 
