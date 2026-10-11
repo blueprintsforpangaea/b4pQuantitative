@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import StockAlerts from "./StockAlerts.jsx";
+import Requests from "./Requests.jsx";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 const SHIPMENT_STORAGE_KEY = "blueprints-current-shipments";
@@ -181,6 +182,7 @@ const tabs = [
   { id: "inventory", label: "Total Inventory" },
   { id: "kpis", label: "Inventory KPIs" },
   { id: "stock-alerts", label: "Stock Alerts" },
+  { id: "requests", label: "Requests" },
   { id: "shipments", label: "Shipments" },
   { id: "shipment-kpis", label: "Shipment KPIs" },
 ];
@@ -4100,6 +4102,8 @@ export default function App() {
       ) : null}
 
       {!loading && !error && activeTab === "stock-alerts" ? <StockAlerts /> : null}
+
+      {!loading && !error && activeTab === "requests" ? <Requests /> : null}
 
       {!loading && !error && activeTab === "kpis" ? (
         <section className="panel">

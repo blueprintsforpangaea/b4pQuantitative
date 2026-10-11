@@ -583,3 +583,59 @@ def update_item_quantity(item_id: str, payload: QuantityUpdateRequest):
     if db.enabled():
         return update_quantity_in_db(item_id, payload.quantity)
     return update_sheet_quantity(item_id=item_id, quantity=payload.quantity)
+
+
+# ==============================
+# REQUESTS (database mode only)
+# ==============================
+REQUEST_STATUSES = ["Under Review", "Approved", "Shipped", "Delivered", "Cancelled", "Denied"]
+
+
+class RequestStatusUpdate(BaseModel):
+    status: str = Field(max_length=40)
+
+
+def group_request_lines(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fold dash_requests lines into one entry per request, newest first."""
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for line in lines:
+        req = grouped.setdefault(line["Request ID"], {
+            "request_id": line["Request ID"], "org_name": line["Org Name"], "org_email": line["Org Email"],
+            "status": line["Status"], "timestamp": line["Timestamp"], "review_flag": False, "items": [],
+        })
+        req["review_flag"] = req["review_flag"] or line["Review Flag"] == "TRUE"
+        req["items"].append({"item_name": line["Item Name"], "category": line["Category"],
+                             "quantity": parse_int(line["Quantity Requested"])})
+    return sorted(grouped.values(), key=lambda r: r["timestamp"], reverse=True)
+
+
+def require_db():
+    if not db.enabled():
+        raise HTTPException(status_code=503, detail="Requests need the database (DATABASE_URL is not set).")
+
+
+@app.get("/requests", dependencies=[Depends(require_admin), Depends(require_db)])
+def list_requests():
+    try:
+        return {"statuses": REQUEST_STATUSES, "requests": group_request_lines(db.fetch_request_lines())}
+    except db.Error as exc:
+        logger.error("Postgres read of requests failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+
+
+@app.post("/requests/{request_id}/status", dependencies=[Depends(require_admin), Depends(require_db)])
+def update_request_status(request_id: str, payload: RequestStatusUpdate):
+    try:
+        found = db.set_request_status(request_id, payload.status)
+    except db.OperationalError as exc:
+        logger.error("Postgres unavailable on request status update: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    except db.Error as exc:
+        msg = str(exc)
+        if "cannot change request" in msg:
+            raise HTTPException(status_code=409, detail=msg.splitlines()[0].replace("ERROR:  ", "")) from exc
+        logger.warning("Postgres rejected request status update: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid status.") from exc
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
+    return {"request_id": request_id, "status": payload.status}

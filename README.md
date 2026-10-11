@@ -67,3 +67,9 @@ With `DATABASE_URL` set:
 | `ADMIN_TOKEN` | Required to edit quantities. `POST /items/{id}/quantity` requires an `X-Admin-Token` header with this value; if it is unset or blank, the endpoint returns 403 (editing disabled). (The dashboard UI has no quantity editor yet; send the header from whatever tool calls this endpoint.) |
 
 Quantities must be between 0 and 999,999.
+
+## Stock alerts and requests (Postgres mode)
+
+- `GET /stock-alerts?soon_days=90&low_stock=1` groups items into expired, expiring soon and low stock (works in both modes).
+- `GET /requests` lists requests grouped per request id and `POST /requests/{id}/status` changes one through `set_request_status()` (409 for a disallowed transition, 404 unknown id). Both need `X-Admin-Token` (`ADMIN_TOKEN`) because they include requester emails, and need `DATABASE_URL`. The Requests tab asks for the token and keeps it in sessionStorage only.
+- Where a price is 0 the UI shows "Price unknown" instead of $0.

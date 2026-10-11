@@ -356,3 +356,54 @@ def test_alerts_endpoint_matches_sql(db_mode):
 def test_alerts_503_when_db_down(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/none")
     assert client.get("/stock-alerts").status_code == 503
+
+
+# ---- requests ----
+def test_group_request_lines():
+    line = lambda rid, item, qty, ts, flag="FALSE": {"Request ID": rid, "Org Name": "O", "Org Email": "o@x", "Item Name": item,
+        "Category": "", "Quantity Requested": qty, "Status": "Under Review", "Timestamp": ts, "Review Flag": flag}
+    out = appmod.group_request_lines([line("A", "i1", "2", "2026-01-01"), line("A", "i2", "3", "2026-01-01", "TRUE"), line("B", "i3", "1", "2026-02-01")])
+    assert [r["request_id"] for r in out] == ["B", "A"]
+    assert out[1]["items"] == [{"item_name": "i1", "category": "", "quantity": 2}, {"item_name": "i2", "category": "", "quantity": 3}]
+    assert out[1]["review_flag"] is True and out[0]["review_flag"] is False
+
+
+def test_requests_need_admin_and_db(monkeypatch):
+    assert anon.get("/requests").status_code == 401
+    assert client.get("/requests").status_code == 503  # sheet mode: no DATABASE_URL
+    assert anon.post("/requests/X/status", json={"status": "Approved"}).status_code == 401
+    monkeypatch.delenv("ADMIN_TOKEN")
+    assert client.get("/requests").status_code == 403
+
+
+@needs_db
+def test_requests_list_matches_db(db_mode):
+    r = client.get("/requests")
+    assert r.status_code == 200
+    n_lines = int(subprocess.run(["psql", SRC_DB, "-Atc", "select count(*) from dash_requests"], capture_output=True, text=True).stdout)
+    n_reqs = int(subprocess.run(["psql", SRC_DB, "-Atc", 'select count(distinct "Request ID") from dash_requests'], capture_output=True, text=True).stdout)
+    body = r.json()
+    assert len(body["requests"]) == n_reqs
+    assert sum(len(x["items"]) for x in body["requests"]) == n_lines
+
+
+@needs_db
+def test_request_status_workflow(copy_db):
+    subprocess.run(["psql", TEST_DB, "-qc", "select create_request('Test Org', 't@example.org', '[{\"item_name\":\"Gauze\",\"quantity\":2}]')"], check=True)
+    rid = subprocess.run(["psql", TEST_DB, "-Atc", 'select "Request ID" from dash_requests where "Org Name"=\'Test Org\''], capture_output=True, text=True).stdout.strip()
+    assert rid.startswith("REQ-")
+    assert client.post(f"/requests/{rid}/status", json={"status": "Approved"}).status_code == 200
+    r = client.post(f"/requests/{rid}/status", json={"status": "Under Review"})
+    assert r.status_code == 409 and "cannot change request" in r.json()["detail"]
+    assert client.post(f"/requests/{rid}/status", json={"status": "bogus"}).status_code == 400
+    assert client.post("/requests/REQ-nope/status", json={"status": "Shipped"}).status_code == 404
+    mine = [x for x in client.get("/requests").json()["requests"] if x["request_id"] == rid][0]
+    assert mine["status"] == "Approved" and mine["items"][0]["quantity"] == 2
+    assert client.post(f"/requests/{rid}/status", json={"status": "Delivered"}).status_code == 200
+    assert client.post(f"/requests/{rid}/status", json={"status": "Cancelled"}).status_code == 409
+
+
+def test_request_status_503_when_db_down(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/none")
+    assert client.get("/requests").status_code == 503
+    assert client.post("/requests/X/status", json={"status": "Approved"}).status_code == 503

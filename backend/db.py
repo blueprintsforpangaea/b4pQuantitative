@@ -44,3 +44,15 @@ def set_quantity(item_id: str, quantity: int) -> Optional[Dict[str, Any]]:
 def ping() -> None:
     with _connect() as conn:
         conn.execute("SELECT 1")
+
+
+def fetch_request_lines() -> List[Dict[str, Any]]:
+    """Rows of dash_requests (one per request line)."""
+    with _connect() as conn:
+        return conn.execute("SELECT * FROM dash_requests").fetchall()
+
+
+def set_request_status(request_id: str, status: str) -> bool:
+    """set_request_status(): False if the request does not exist. Raises db.Error for bad/forbidden changes."""
+    with _connect() as conn:
+        return conn.execute("SELECT set_request_status(%s, %s) AS ok", (request_id, status)).fetchone()["ok"]
