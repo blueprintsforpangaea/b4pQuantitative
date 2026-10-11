@@ -82,10 +82,27 @@ def db_mode(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"postgresql:///{SRC_DB}")
 
 
+TEMPLATE_DB = "b4p_dash_tpl"
+
+
+@pytest.fixture(scope="session")
+def template_db():
+    """A private snapshot of b4p_v2 (pg_dump, which takes no exclusive lock) that tests copy with
+    createdb -T, so they never fail because another session is connected to b4p_v2."""
+    if not _db_exists(SRC_DB):
+        pytest.skip(f"{SRC_DB} not available")
+    subprocess.run(["dropdb", "--if-exists", "--force", TEMPLATE_DB], check=True)
+    subprocess.run(["createdb", TEMPLATE_DB], check=True)
+    dump = subprocess.run(["pg_dump", "--no-owner", SRC_DB], capture_output=True, check=True).stdout
+    subprocess.run(["psql", "-q", "-v", "ON_ERROR_STOP=1", TEMPLATE_DB], input=dump, capture_output=True, check=True)
+    yield TEMPLATE_DB
+    subprocess.run(["dropdb", "--if-exists", "--force", TEMPLATE_DB], check=True)
+
+
 @pytest.fixture
-def copy_db(monkeypatch):
-    subprocess.run(["dropdb", "--if-exists", TEST_DB], check=True)
-    subprocess.run(["createdb", "-T", SRC_DB, TEST_DB], check=True)
+def copy_db(monkeypatch, template_db):
+    subprocess.run(["dropdb", "--if-exists", "--force", TEST_DB], check=True)
+    subprocess.run(["createdb", "-T", template_db, TEST_DB], check=True)
     monkeypatch.setenv("DATABASE_URL", f"postgresql:///{TEST_DB}")
     yield
     subprocess.run(["dropdb", "--if-exists", "--force", TEST_DB], check=True)
@@ -578,3 +595,16 @@ def test_packing_list_endpoint(copy_db):
     rows = _rows(r.text)
     assert rows[0][0] == "Request" and any(x[4] == "In stock" for x in rows[1:]) and rows[-1][4] == "Not found in stock"
     assert client.get("/requests/REQ-nope/packing-list.csv").status_code == 404
+
+
+@needs_db
+def test_sync_status_refused_run_is_not_ok(copy_db):
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
+    assert client.get("/sync-status").json()["last_run_refused"] is False
+    # simulate the view gaining the new column (older views simply lack it)
+    import types
+    real = appmod.db.fetch_sync_status
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(appmod.db, "fetch_sync_status", lambda: {**real(), "last_run_ok": True, "last_run_refused": True})
+        body = client.get("/sync-status").json()
+    assert body["last_run_ok"] is False and body["last_run_refused"] is True

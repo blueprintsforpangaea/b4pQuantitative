@@ -34,12 +34,14 @@ export default function SyncCell({ fallbackLabel }) {
     );
   }
   const when = status.last_success_at;
-  const stale = status.last_run_ok === false;
+  const failed = status.last_run_ok === false;
+  const exact = when ? new Date(when).toLocaleString() : "never";
+  // Always the last SUCCESSFUL sync; a failed latest attempt is said out loud.
+  const text = !when ? "Never" : failed ? `Last successful sync ${ago(when)}; latest attempt failed` : ago(when);
   return (
-    <div className="title-block-cell" title={when ? `Last successful sync: ${new Date(when).toLocaleString()}` : "The inventory has never synced"}>
-      <p className="title-block-label">Last synced</p>
-      <p className="title-block-value">{when ? ago(when) : "Never"}</p>
-      {stale ? <p className="title-block-label">Latest sync did not complete</p> : null}
+    <div className="title-block-cell" title={`Last successful sync: ${exact}`}>
+      <p className="title-block-label">{failed || !when ? "Sync status" : "Last synced"}</p>
+      <p className="title-block-value">{text}</p>
     </div>
   );
 }

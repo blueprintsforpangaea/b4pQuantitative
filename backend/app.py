@@ -496,7 +496,9 @@ def sync_status():
         "source": "postgres",
         "last_success_at": iso(row["last_success_at"]),
         "last_run_at": iso(row["last_run_at"]),
-        "last_run_ok": row["last_run_ok"],
+        # last_run_refused (sync refused by its safety rails) may not exist in older views: treat refused as not ok
+        "last_run_ok": None if row["last_run_ok"] is None else bool(row["last_run_ok"]) and not row.get("last_run_refused"),
+        "last_run_refused": bool(row.get("last_run_refused")),
         "last_warning_count": row["last_warning_count"],
         "active_items": row["active_items"],
     }
