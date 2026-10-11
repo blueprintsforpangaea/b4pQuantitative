@@ -102,6 +102,19 @@ describe("Requests", () => {
     expect(fetch.mock.calls[0][1].headers["X-Admin-Token"]).toBe("t");
   });
 
+  it("shows a non-blocking over-commit warning with the right wording per status", async () => {
+    sessionStorage.setItem("b4p-admin-token", "t");
+    const withWarnings = { ...data, requests: [
+      { ...data.requests[0], warnings: [{ item_name: "Gauze", committed: 12, in_stock: 8 }] },
+      { ...data.requests[0], request_id: "REQ-3", status: "Approved", warnings: [{ item_name: "Tape", committed: 9, in_stock: 8 }] },
+    ] };
+    fetch.mockReturnValue(json(withWarnings));
+    render(<Requests />);
+    expect(await screen.findByText("Approving this would commit 12 of 8 in stock: Gauze")).toBeTruthy();
+    expect(screen.getByText("Approved requests commit 9 of 8 in stock: Tape")).toBeTruthy();
+    expect(screen.getByLabelText("Change status of REQ-1").disabled).toBe(false); // display only, never blocks
+  });
+
   it("shows an empty state for a filter with no requests", async () => {
     sessionStorage.setItem("b4p-admin-token", "t");
     fetch.mockReturnValue(json({ ...data, requests: [] }));

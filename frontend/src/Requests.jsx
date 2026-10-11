@@ -122,7 +122,14 @@ export default function Requests() {
                 <tr key={r.request_id}>
                   <th scope="row" style={{ fontWeight: "inherit", textAlign: "left" }}>{r.request_id}{r.review_flag ? " (flagged)" : ""}</th>
                   <td>{r.org_name}<br /><small>{r.org_email || "no email"}</small></td>
-                  <td style={{ whiteSpace: "normal", minWidth: "260px" }}>{r.items.map((i) => `${i.quantity} x ${i.item_name}`).join("; ")}</td>
+                  <td style={{ whiteSpace: "normal", minWidth: "260px" }}>
+                    {r.items.map((i) => `${i.quantity} x ${i.item_name}`).join("; ")}
+                    {(r.warnings || []).map((w) => (
+                      <p key={w.item_name} className="stock-warning" style={{ color: "#8a4b00", margin: "6px 0 0" }}>
+                        {r.status === "Approved" ? "Approved requests commit" : "Approving this would commit"} {w.committed} of {w.in_stock} in stock: {w.item_name}
+                      </p>
+                    ))}
+                  </td>
                   <td>{new Date(r.timestamp).toLocaleDateString()}</td>
                   <td>{r.status}</td>
                   <td>

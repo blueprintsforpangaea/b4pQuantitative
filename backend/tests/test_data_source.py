@@ -650,3 +650,41 @@ def test_packing_list_handles_suffix_case_and_whitespace():
     assert col(rows[1], "Requested lot") == "L9" and col(rows[1], "Requested box") == "1"
     assert col(rows[3], "Match") == "In stock" and col(rows[3], "Supply ID") == "3"  # case and spacing ignored
     assert col(rows[4], "Match") == "Not found in stock"
+
+
+# ---- over-commit warnings (display only) ----
+def test_over_commit_warnings():
+    from backend.exports import add_stock_warnings
+    stock = [_it("1", 8, None).model_copy(update={"name": "NITRILE GLOVES MEDIUM"}), _it("2", 0, None).model_copy(update={"name": "Tape"})]
+    req = lambda rid, status, name, qty: {"request_id": rid, "status": status, "items": [{"item_name": name, "category": "", "quantity": qty}]}
+    reqs = [req("A", "Approved", "Nitrile Gloves Medium [Lot L9, Box 1, Pallet 1]", 6),
+            req("B", "Under Review", "nitrile  gloves medium", 6),
+            req("C", "Under Review", "Nitrile Gloves Medium", 2),
+            req("D", "Delivered", "Nitrile Gloves Medium", 50),
+            req("E", "Under Review", "Tape", 1)]
+    add_stock_warnings(reqs, stock)
+    w = {r["request_id"]: r["warnings"] for r in reqs}
+    assert w["A"] == []                                                    # 6 approved of 8 is fine
+    assert w["B"] == [{"item_name": "nitrile  gloves medium", "committed": 12, "in_stock": 8}]  # 6 + 6 of 8
+    assert w["C"] == []                                                    # 6 + 2 = 8 fits exactly
+    assert w["D"] == []                                                    # closed requests get no warning
+    assert w["E"] == [{"item_name": "Tape", "committed": 1, "in_stock": 0}]
+
+
+def test_approved_request_warns_when_approvals_exceed_stock():
+    from backend.exports import add_stock_warnings
+    stock = [_it("1", 8, None).model_copy(update={"name": "Gauze"})]
+    req = lambda rid, qty: {"request_id": rid, "status": "Approved", "items": [{"item_name": "Gauze", "category": "", "quantity": qty}]}
+    reqs = [req("A", 6), req("B", 6)]
+    add_stock_warnings(reqs, stock)
+    assert [r["warnings"][0]["committed"] for r in reqs] == [12, 12]
+
+
+@needs_db
+def test_requests_endpoint_includes_warnings(copy_db):
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-qAtc", sql], capture_output=True, text=True, check=True).stdout.strip()
+    name, qty = psql("select name || '|' || quantity from dash_items where quantity > 0 and name !~ '[|]' limit 1").rsplit("|", 1)
+    n = name.replace("'", "''")
+    psql(f"select create_request('Warn Org', 'w@example.org', jsonb_build_array(jsonb_build_object('item_name', '{n}', 'quantity', {int(qty) + 1})))")
+    mine = [r for r in client.get("/requests").json()["requests"] if r["org_name"] == "Warn Org"][0]
+    assert mine["warnings"] and mine["warnings"][0]["committed"] == int(qty) + 1

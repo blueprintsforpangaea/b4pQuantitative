@@ -88,3 +88,33 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
     return to_csv(["Request", "Organization", "Requested item", "Quantity requested", "Match", "Supply ID",
                    "On hand", "Pallet", "Box category", "Box number", "Expiration date",
                    "Requested lot", "Requested box", "Requested pallet", "In requested box and pallet"], rows)
+
+
+def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None:
+    """Add request['warnings'] to open requests (Under Review / Approved). Display only.
+
+    For each line: committed = quantity of that item already approved on *other* requests + this line.
+    If committed exceeds what is in stock (names matched as in the packing list) the line is listed.
+    """
+    stock: Dict[str, int] = {}
+    for i in items:
+        stock[_norm(i.name)] = stock.get(_norm(i.name), 0) + max(i.quantity, 0)
+    key = lambda raw: _norm(parse_requested_name(raw)["name"])
+    approved: Dict[str, int] = {}
+    for r in requests:
+        if r["status"] == "Approved":
+            for line in r["items"]:
+                approved[key(line["item_name"])] = approved.get(key(line["item_name"]), 0) + line["quantity"]
+    for r in requests:
+        warnings = []
+        if r["status"] in ("Under Review", "Approved"):
+            this: Dict[str, int] = {}
+            for line in r["items"]:
+                this[key(line["item_name"])] = this.get(key(line["item_name"]), 0) + line["quantity"]
+            for k, qty in this.items():
+                others = approved.get(k, 0) - (qty if r["status"] == "Approved" else 0)
+                committed, in_stock = others + qty, stock.get(k, 0)
+                if committed > in_stock:
+                    name = next(l["item_name"] for l in r["items"] if key(l["item_name"]) == k)
+                    warnings.append({"item_name": parse_requested_name(name)["name"], "committed": committed, "in_stock": in_stock})
+        r["warnings"] = warnings

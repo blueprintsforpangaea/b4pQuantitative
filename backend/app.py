@@ -23,11 +23,11 @@ except ImportError:  # pragma: no cover - optional until credentials are configu
 try:
     from . import db
     from .alerts import build_alerts
-    from .exports import expiring_csv, packing_list_csv
+    from .exports import add_stock_warnings, expiring_csv, packing_list_csv
 except ImportError:  # run as `uvicorn app:app` from inside backend/
     import db
     from alerts import build_alerts
-    from exports import expiring_csv, packing_list_csv
+    from exports import add_stock_warnings, expiring_csv, packing_list_csv
 
 logger = logging.getLogger(__name__)
 
@@ -681,9 +681,11 @@ def require_db():
 
 
 @app.get("/requests", dependencies=[Depends(require_admin), Depends(require_db)])
-def list_requests():
+def list_requests(response: Response):
     try:
-        return {"statuses": REQUEST_STATUSES, "requests": group_request_lines(db.fetch_request_lines())}
+        requests_ = group_request_lines(db.fetch_request_lines())
+        add_stock_warnings(requests_, load_items(response))
+        return {"statuses": REQUEST_STATUSES, "requests": requests_}
     except db.Error as exc:
         logger.error("Postgres read of requests failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database unavailable.") from exc
