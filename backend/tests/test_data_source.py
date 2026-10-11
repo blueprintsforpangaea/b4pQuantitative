@@ -629,7 +629,10 @@ def test_parse_requested_name():
     assert parse_requested_name("Nitrile Gloves Medium [Lot L9, Box 1, Pallet 2]") == {"name": "Nitrile Gloves Medium", "lot": "L9", "box": 1, "pallet": 2}
     assert parse_requested_name("Gauze")["name"] == "Gauze" and parse_requested_name("Gauze")["box"] is None
     assert parse_requested_name("Tube [Lot A 1]")["lot"] == "A 1"
-    assert parse_requested_name("X [odd]")["name"] == "X"
+    assert parse_requested_name("X [odd]")["name"] == "X [odd]"  # not a lot suffix: part of the name
+    assert parse_requested_name("Tape [Pack of 12]")["name"] == "Tape [Pack of 12]"
+    assert parse_requested_name("Tape [Pack of 12] [Lot 5, Box 2]") == {"name": "Tape [Pack of 12]", "lot": "5", "box": 2, "pallet": None}
+    assert parse_requested_name("Tape [lot 5]")["lot"] == "5"
 
 
 def test_packing_list_handles_suffix_case_and_whitespace():
@@ -698,3 +701,15 @@ def test_unmatched_names_get_a_note_not_a_warning():
         {"item_name": "Gauzze [Lot 1, Box 2, Pallet 1]", "category": "", "quantity": 99}]}]
     add_stock_warnings(reqs, stock)
     assert reqs[0]["warnings"] == [] and reqs[0]["unmatched"] == ["Gauzze"]
+
+
+def test_bracketed_inventory_names_still_match():
+    from backend.exports import add_stock_warnings, packing_list_csv
+    stock = [_it("1", 8, None).model_copy(update={"name": "Tape [Pack of 12]"})]
+    req = {"request_id": "R", "org_name": "O", "status": "Under Review", "items": [
+        {"item_name": "Tape [Pack of 12] [Lot 5, Box 1, Pallet 1]", "category": "", "quantity": 2},
+        {"item_name": "tape [pack of 12]", "category": "", "quantity": 1}]}
+    rows = _rows(packing_list_csv(req, stock))
+    assert [r[4] for r in rows[1:]] == ["In stock", "In stock"]
+    add_stock_warnings([req], stock)
+    assert req["unmatched"] == [] and req["warnings"] == []

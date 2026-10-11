@@ -33,7 +33,8 @@ def expiring_csv(alerts: Dict[str, Any]) -> str:
                    "Pallet", "Box category", "Box number"], rows)
 
 
-_SUFFIX = re.compile(r"\s*\[([^\]]*)\]\s*$")
+# Only the partner site's "[Lot ..., Box ..., Pallet ...]" suffix; other brackets are part of the name ("Tape [Pack of 12]").
+_SUFFIX = re.compile(r"\s*\[(Lot\b[^\]]*)\]\s*$", re.IGNORECASE)
 
 
 def _norm(name: str) -> str:
