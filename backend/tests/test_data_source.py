@@ -607,3 +607,17 @@ def test_sync_status_refused_run_is_not_ok(copy_db):
         mp.setattr(appmod.db, "fetch_sync_status", lambda: {**real(), "last_run_ok": True, "last_run_refused": True})
         body = client.get("/sync-status").json()
     assert body["last_run_ok"] is False and body["last_run_refused"] is True
+
+
+@needs_db
+def test_sync_status_refused_run_real_column(copy_db):
+    """Against the real dash_sync_status.last_run_refused column (a run stopped by a safety guard)."""
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-qAtc", sql], capture_output=True, text=True, check=True).stdout.strip()
+    before = client.get("/sync-status").json()
+    psql("insert into sync_run(started_at, finished_at, source, refused) values (now(), now(), 'service-account:Final Inventorying', 'wrong tab')")
+    body = client.get("/sync-status").json()
+    assert body["last_run_refused"] is True and body["last_run_ok"] is False
+    assert body["last_success_at"] == before["last_success_at"]  # a refused run is not a success
+    psql("insert into sync_run(started_at, finished_at, source) values (now(), now(), 'service-account:Final Inventorying')")
+    ok = client.get("/sync-status").json()
+    assert ok["last_run_refused"] is False and ok["last_run_ok"] is True and ok["last_success_at"] != before["last_success_at"]
