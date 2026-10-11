@@ -383,7 +383,7 @@ def test_group_request_lines():
         "Category": "", "Quantity Requested": qty, "Status": "Under Review", "Timestamp": ts, "Review Flag": flag}
     out = appmod.group_request_lines([line("A", "i1", "2", "2026-01-01"), line("A", "i2", "3", "2026-01-01", "TRUE"), line("B", "i3", "1", "2026-02-01")])
     assert [r["request_id"] for r in out] == ["B", "A"]
-    assert out[1]["items"] == [{"item_name": "i1", "category": "", "quantity": 2}, {"item_name": "i2", "category": "", "quantity": 3}]
+    assert out[1]["items"] == [{"item_name": "i1", "category": "", "quantity": 2, "item_id": ""}, {"item_name": "i2", "category": "", "quantity": 3, "item_id": ""}]
     assert out[1]["review_flag"] is True and out[0]["review_flag"] is False
 
 
@@ -805,3 +805,50 @@ def test_warnings_use_approximate_match_but_not_for_ties():
     assert w["C"]["warnings"] == [] and len(w["C"]["candidates"][0]["names"]) == 2  # "Tape" ties: only a note
     assert w["D"]["unmatched"] == ["Scissors"] and w["D"]["warnings"] == []
     assert w["E"]["warnings"][0]["match"] == "exact"
+
+
+# ---- item id on request lines beats name matching ----
+def test_packing_list_and_warnings_prefer_item_id():
+    from backend.exports import add_stock_warnings, packing_list_csv
+    items = [_inv("10", "Gauze 4x4 sterile", qty=3, pallet_number=2, box_number=7), _inv("11", "Gauze 4x4 latex", qty=9),
+             _inv("12", "Tape", qty=0)]
+    line = lambda name, ref, qty=1: {"item_name": name, "category": "", "quantity": qty, "item_id": ref}
+    req = {"request_id": "R", "org_name": "O", "status": "Under Review", "items": [
+        line("Gauze 4x4", "10"),        # ambiguous by name (tie), exact by id
+        line("Anything", "11"),         # id wins even when the name matches nothing
+        line("Tape", "12"),             # known item, none on hand
+        line("Old thing", "999"),       # id not in inventory any more
+        line("Gauze 4x4", "")]}         # no id: falls back to name matching (a tie)
+    rows = _rows(packing_list_csv(req, items))
+    hdr = rows[0]
+    got = [(r[hdr.index("Match")], r[hdr.index("Supply ID")]) for r in rows[1:]]
+    assert got[:4] == [("In stock (requested item)", "10"), ("In stock (requested item)", "11"), ("None on hand", "12"), ("No longer in stock", "999")]
+    assert [g[0] for g in got[4:]] == ["Approximate match - candidate"] * 2
+    assert rows[1][hdr.index("Pallet")] == "2" and rows[1][hdr.index("Box number")] == "7"
+    add_stock_warnings([req], items)
+    assert req["removed"] == ["Old thing"] and req["candidates"][0]["item_name"] == "Gauze 4x4"
+    assert req["unmatched"] == []
+    w = {x["item_name"]: x for x in req["warnings"]}
+    assert w["Tape"]["committed"] == 1 and w["Tape"]["in_stock"] == 0 and w["Tape"]["match"] == "exact"
+
+
+def test_group_request_lines_carries_item_id():
+    line = lambda item, ref: {"Request ID": "A", "Org Name": "O", "Org Email": "", "Item Name": item, "Category": "", "Quantity Requested": "1",
+                              "Status": "Under Review", "Timestamp": "2026-01-01", "Review Flag": "FALSE", "Item ID": ref}
+    out = appmod.group_request_lines([line("x", "7"), line("y", "")])
+    assert [i["item_id"] for i in out[0]["items"]] == ["7", ""]
+    old = {k: v for k, v in line("z", "").items() if k != "Item ID"}   # view without the column yet
+    assert appmod.group_request_lines([old])[0]["items"][0]["item_id"] == ""
+
+
+@needs_db
+def test_requests_endpoint_and_packing_list_use_real_item_id(copy_db):
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-qAtc", sql], capture_output=True, text=True, check=True).stdout.strip()
+    iid, name = psql("select id || '|' || name from dash_items where quantity > 0 and name !~ '[|]' limit 1").split("|", 1)
+    psql(f"select create_request('Id Org', 'i@example.org', jsonb_build_array(jsonb_build_object('item_name', 'Some other wording', 'quantity', 1, 'item_id', '{iid}')))")
+    req = [r for r in client.get("/requests").json()["requests"] if r["org_name"] == "Id Org"][0]
+    assert req["items"][0]["item_id"] == iid and req["unmatched"] == [] and req["removed"] == []
+    rows = _rows(client.get(f"/requests/{req['request_id']}/packing-list.csv").text)
+    hdr = rows[0]
+    assert rows[1][hdr.index("Match")] == "In stock (requested item)" and rows[1][hdr.index("Supply ID")] == iid
+    assert rows[1][hdr.index("Inventory name")] == name

@@ -98,7 +98,9 @@ def _products(items: List[Any]) -> Dict[str, frozenset]:
 def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
     """One row per (requested line, matching inventory row).
 
-    Requested names are free text and often carry a ' [Lot X, Box Y, Pallet Z]' suffix. A line is matched
+    A line that carries the item id the requester picked uses exactly that inventory row ("In stock
+    (requested item)", "None on hand" or "No longer in stock") and no name matching. Otherwise requested
+    names are free text and often carry a ' [Lot X, Box Y, Pallet Z]' suffix. A line is matched
     to in-stock inventory by exact name (suffix removed, case and spacing ignored); failing that by
     significant words ("Approximate match"), and when several different names tie every one is listed
     as a candidate. Within a name, rows matching the most of the requested lot, box and pallet come
@@ -109,6 +111,7 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
         if i.quantity > 0:
             by_name.setdefault(_norm(i.name), []).append(i)
     products = {k: significant_tokens(k) for k in by_name}
+    by_id = {i.id: i for i in items}
     rows = []
     for line in request["items"]:
         want = parse_requested_name(line["item_name"])
@@ -125,13 +128,21 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
         def exact(i):
             return any(asked) and score(i) == sum(asked)
 
-        kind, keys = find_match(want["name"], products)
-        label = {"exact": "In stock", "approximate": "Approximate match", "candidates": "Approximate match - candidate"}.get(kind)
-        ranked = lambda k: sorted(by_name[k], key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
-        # exact/approximate: several rows of the one product; candidates: the best row of each tied product
-        matches = ranked(keys[0])[:MAX_MATCHES_PER_LINE] if kind in ("exact", "approximate") else [ranked(k)[0] for k in keys[:MAX_MATCHES_PER_LINE]]
+        ref = line.get("item_id") or ""
+        if ref:  # the requester picked an exact inventory row: no name matching
+            picked = by_id.get(ref)
+            kind = "id" if picked is not None and picked.quantity > 0 else ("out" if picked is not None else "gone")
+            keys = []
+            matches = [picked] if kind == "id" else []
+        else:
+            kind, keys = find_match(want["name"], products)
+            ranked = lambda k: sorted(by_name[k], key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
+            # exact/approximate: several rows of the one product; candidates: the best row of each tied product
+            matches = ranked(keys[0])[:MAX_MATCHES_PER_LINE] if kind in ("exact", "approximate") else [ranked(k)[0] for k in keys[:MAX_MATCHES_PER_LINE]]
+        label = {"id": "In stock (requested item)", "exact": "In stock", "approximate": "Approximate match", "candidates": "Approximate match - candidate"}.get(kind)
         if not matches:
-            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "Not found in stock", "", "", "", "", "", "", *extra, "", "", ""])
+            missing = {"out": "None on hand", "gone": "No longer in stock"}.get(kind, "Not found in stock")
+            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], missing, ref, "", "", "", "", "", *extra, "", "", picked.name if ref and picked else ""])
         for m in matches:
             rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], label, m.id,
                          m.quantity, m.pallet_number, m.category_box, m.box_number, m.expiration_date or "", *extra,
@@ -152,6 +163,7 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
     close products is listed in candidates (no shortage is claimed for it).
     """
     products = _products(items)
+    by_id = {i.id: i for i in items}
     stock: Dict[str, int] = {}
     shown: Dict[str, str] = {}
     for i in items:
@@ -160,7 +172,12 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
         shown.setdefault(k, i.name)
     resolved: Dict[str, Any] = {}
 
-    def resolve(raw):
+    def resolve(line):
+        """("id"|exact|approximate|candidates|none|gone, keys): an item id the requester picked beats any name matching."""
+        raw, ref = line["item_name"], line.get("item_id") or ""
+        if ref:
+            picked = by_id.get(ref)
+            return ("id", [_norm(picked.name)]) if picked is not None else ("gone", [])
         if raw not in resolved:
             resolved[raw] = find_match(parse_requested_name(raw)["name"], products)
         return resolved[raw]
@@ -169,27 +186,30 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
     for r in requests:
         if r["status"] == "Approved":
             for line in r["items"]:
-                kind, keys = resolve(line["item_name"])
-                if kind in ("exact", "approximate"):
+                kind, keys = resolve(line)
+                if kind in ("id", "exact", "approximate"):
                     approved[keys[0]] = approved.get(keys[0], 0) + line["quantity"]
     for r in requests:
-        warnings, unmatched, candidates = [], [], []
+        warnings, unmatched, candidates, removed = [], [], [], []
         if r["status"] in ("Under Review", "Approved"):
             this: Dict[str, int] = {}
             kinds: Dict[str, str] = {}
             for line in r["items"]:
-                kind, keys = resolve(line["item_name"])
+                kind, keys = resolve(line)
                 name = parse_requested_name(line["item_name"])["name"]
-                if kind == "none":
+                if kind == "gone":
+                    removed.append(name)
+                elif kind == "none":
                     unmatched.append(name)
                 elif kind == "candidates":
                     candidates.append({"item_name": name, "names": [shown[k] for k in keys[:5]]})
                 else:
                     this[keys[0]] = this.get(keys[0], 0) + line["quantity"]
-                    kinds[keys[0]] = "exact" if kinds.get(keys[0], kind) == "exact" and kind == "exact" else "approximate"
+                    this_kind = "exact" if kind in ("exact", "id") else "approximate"
+                    kinds[keys[0]] = "exact" if kinds.get(keys[0], this_kind) == "exact" and this_kind == "exact" else "approximate"
             for k, qty in this.items():
                 others = approved.get(k, 0) - (qty if r["status"] == "Approved" else 0)
                 committed, in_stock = others + qty, stock.get(k, 0)
                 if committed > in_stock:
                     warnings.append({"item_name": shown[k], "committed": committed, "in_stock": in_stock, "match": kinds[k]})
-        r["warnings"], r["unmatched"], r["candidates"] = warnings, unmatched, candidates
+        r["warnings"], r["unmatched"], r["candidates"], r["removed"] = warnings, unmatched, candidates, removed

@@ -673,7 +673,8 @@ def group_request_lines(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
         req["review_flag"] = req["review_flag"] or line["Review Flag"] == "TRUE"
         req["items"].append({"item_name": line["Item Name"], "category": line["Category"],
-                             "quantity": parse_int(line["Quantity Requested"])})
+                             "quantity": parse_int(line["Quantity Requested"]),
+                             "item_id": (line.get("Item ID") or "").strip()})
     return sorted(grouped.values(), key=lambda r: r["timestamp"], reverse=True)
 
 

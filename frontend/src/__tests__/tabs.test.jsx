@@ -133,6 +133,13 @@ describe("Requests", () => {
     expect(screen.getByText("Could be several inventory items; check the name: Tape (Tape roll; Tape strip)")).toBeTruthy();
   });
 
+  it("notes items that left the inventory", async () => {
+    sessionStorage.setItem("b4p-admin-token", "t");
+    fetch.mockReturnValue(json({ ...data, requests: [{ ...data.requests[0], removed: ["Gauze"] }] }));
+    render(<Requests />);
+    expect(await screen.findByText("No longer in stock (removed from the inventory sheet): Gauze")).toBeTruthy();
+  });
+
   it("shows an empty state for a filter with no requests", async () => {
     sessionStorage.setItem("b4p-admin-token", "t");
     fetch.mockReturnValue(json({ ...data, requests: [] }));
