@@ -440,3 +440,18 @@ def test_items_cache_expires(copy_db, monkeypatch):
     appmod._items_cache["at"] -= 61
     client.get("/items")
     assert len(calls) == 2
+
+
+@needs_db
+def test_status_edit_drops_items_cache(copy_db, monkeypatch):
+    monkeypatch.setenv("ITEMS_CACHE_SECONDS", "60")
+    appmod.clear_items_cache()
+    client.get("/items")
+    assert appmod._items_cache["items"] is not None
+    rid = subprocess.run(["psql", TEST_DB, "-Atc", 'select "Request ID" from dash_requests limit 1'], capture_output=True, text=True).stdout.strip()
+    assert client.post(f"/requests/{rid}/status", json={"status": "Approved"}).status_code == 200
+    assert appmod._items_cache["items"] is None
+    # a rejected edit leaves the cache alone
+    client.get("/items")
+    assert client.post(f"/requests/{rid}/status", json={"status": "Under Review"}).status_code == 409
+    assert appmod._items_cache["items"] is not None

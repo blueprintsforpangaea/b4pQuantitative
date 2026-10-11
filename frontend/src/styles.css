@@ -3126,3 +3126,66 @@ thead th {
     justify-content: flex-start;
   }
 }
+
+/* Narrow screens (360px): single column everywhere, nothing wider than the viewport. */
+@media (max-width: 720px) {
+  .kpi-card-half,
+  .kpi-card-third,
+  .kpi-card-full {
+    grid-column: 1 / -1;
+  }
+
+  .kpi-analytics-grid > *,
+  .shipment-kpi-grid > *,
+  .shipment-kpi-overview-split > *,
+  .shipment-kpi-column > * {
+    min-width: 0;
+  }
+
+  .shipment-kpi-overview-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shipment-kpi-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .expiration-pie-layout,
+  .category-pie-card .expiration-pie-layout,
+  .kpi-compact-card .expiration-pie-layout {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .expiration-pie-legend {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .shipment-subtabs {
+    flex-wrap: wrap;
+  }
+
+  .shipment-subtab {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .shipment-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shipment-card {
+    min-width: 0;
+  }
+
+  .shipment-card-left-column,
+  .shipment-card-title {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

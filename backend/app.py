@@ -649,6 +649,7 @@ def list_requests():
 def update_request_status(request_id: str, payload: RequestStatusUpdate):
     try:
         found = db.set_request_status(request_id, payload.status)
+        clear_items_cache()  # any write through this API starts the next read from the database
     except db.OperationalError as exc:
         logger.error("Postgres unavailable on request status update: %s", exc)
         raise HTTPException(status_code=503, detail="Database unavailable.") from exc
