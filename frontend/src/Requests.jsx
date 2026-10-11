@@ -126,7 +126,12 @@ export default function Requests() {
                     {r.items.map((i) => `${i.quantity} x ${i.item_name}`).join("; ")}
                     {(r.warnings || []).map((w) => (
                       <p key={w.item_name} className="stock-warning" style={{ color: "#8a4b00", margin: "6px 0 0" }}>
-                        {r.status === "Approved" ? "Approved requests commit" : "Approving this would commit"} {w.committed} of {w.in_stock} in stock: {w.item_name}
+                        {r.status === "Approved" ? "Approved requests commit" : "Approving this would commit"} {w.committed} of {w.in_stock} in stock{w.match === "approximate" ? " (approximate match)" : ""}: {w.item_name}
+                      </p>
+                    ))}
+                    {(r.candidates || []).map((c) => (
+                      <p key={`c-${c.item_name}`} className="stock-note" style={{ color: "#6b6b6b", margin: "6px 0 0" }}>
+                        Could be several inventory items; check the name: {c.item_name} ({c.names.join("; ")})
                       </p>
                     ))}
                     {(r.unmatched || []).map((name) => (

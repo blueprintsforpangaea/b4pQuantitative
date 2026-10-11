@@ -670,10 +670,10 @@ def test_over_commit_warnings():
     add_stock_warnings(reqs, stock)
     w = {r["request_id"]: r["warnings"] for r in reqs}
     assert w["A"] == []                                                    # 6 approved of 8 is fine
-    assert w["B"] == [{"item_name": "nitrile  gloves medium", "committed": 12, "in_stock": 8}]  # 6 + 6 of 8
+    assert w["B"] == [{"item_name": "NITRILE GLOVES MEDIUM", "committed": 12, "in_stock": 8, "match": "exact"}]  # 6 + 6 of 8
     assert w["C"] == []                                                    # 6 + 2 = 8 fits exactly
     assert w["D"] == []                                                    # closed requests get no warning
-    assert w["E"] == [{"item_name": "Tape", "committed": 1, "in_stock": 0}]  # known item, none on hand: real shortage
+    assert w["E"] == [{"item_name": "Tape", "committed": 1, "in_stock": 0, "match": "exact"}]  # known item, none on hand: real shortage
 
 
 def test_approved_request_warns_when_approvals_exceed_stock():
@@ -738,3 +738,70 @@ def test_packing_list_prefers_the_exact_lot():
 def test_items_expose_lot_number(db_mode):
     items = client.get("/items").json()
     assert any(i["lot_number"] for i in items) and all("lot_number" in i for i in items)
+
+
+# ---- approximate (token) matching ----
+def _inv(id, name, qty=5, exp=None, **kw):
+    return _it(id, qty, exp).model_copy(update={"name": name, **kw})
+
+
+def test_significant_tokens_ignore_punctuation_stopwords_and_unit_spacing():
+    from backend.exports import significant_tokens
+    assert significant_tokens('BD Vacutainer Safety-Lok Blood Collection Set 21G x 3/4" x 12"') == frozenset(
+        {"vacutainer", "safety", "lok", "blood", "collection", "set", "21g"}) | {"bd"} - {"bd"} | frozenset()
+    assert significant_tokens("Needle 21 G") == significant_tokens("needle 21G")
+    assert significant_tokens("Tape and the Gauze") == frozenset({"tape", "gauze"})
+
+
+def test_find_match_exact_approximate_candidates_none():
+    from backend.exports import _norm, find_match, _products
+    products = _products([_inv("1", 'BD Vacutainer Safety-Lok Blood Collection Set 21G x 3/4" x 12"'),
+                          _inv("2", 'BD Vacutainer Safety-Lok Blood Collection Set 23G x 3/4" x 12"'),
+                          _inv("3", "Gauze 4x4 sterile"), _inv("4", "Gauze 4x4 latex"), _inv("5", "Tape")])
+    assert find_match("tape", products) == ("exact", ["tape"])
+    kind, keys = find_match("BD Vacutainer Safety-Lok Blood Collection Set 21G", products)
+    assert kind == "approximate" and len(keys) == 1 and "21g" in keys[0]
+    kind, keys = find_match("BD Vacutainer Safety-Lok Blood Collection Set", products)
+    assert kind == "candidates" and len(keys) == 2          # two products tie: never pick one
+    assert find_match("Gauze 4x4", products)[0] == "candidates"   # sterile vs latex: same score
+    assert find_match("Gauze 4x4 sterile", products) == ("exact", ["gauze 4x4 sterile"])
+    assert find_match("Surgical scissors", products) == ("none", [])
+    assert find_match("an of the", products) == ("none", [])
+
+
+def test_approximate_closest_name_wins_over_longer_ones():
+    from backend.exports import find_match, _products
+    products = _products([_inv("1", "Tape"), _inv("2", "Medical Tape Roll Waterproof Large")])
+    assert find_match("Tape Roll", products) == ("approximate", ["medical tape roll waterproof large"])
+
+
+def test_packing_list_labels_approximate_and_candidates():
+    from backend.exports import packing_list_csv
+    items = [_inv("1", "BD Vacutainer Safety-Lok Blood Collection Set 21G x 3/4in", expiration_date=None),
+             _inv("2", "Gauze 4x4 sterile"), _inv("3", "Gauze 4x4 latex"), _inv("4", "Nitrile Gloves Medium")]
+    req = {"request_id": "R", "org_name": "O", "items": [
+        {"item_name": "BD Vacutainer Safety-Lok Blood Collection Set", "category": "", "quantity": 1},
+        {"item_name": "Gauze 4x4", "category": "", "quantity": 1},
+        {"item_name": "nitrile gloves medium", "category": "", "quantity": 1},
+        {"item_name": "Scalpel", "category": "", "quantity": 1}]}
+    rows = _rows(packing_list_csv(req, items))
+    hdr = rows[0]
+    got = [(r[hdr.index("Match")], r[hdr.index("Supply ID")]) for r in rows[1:]]
+    assert got == [("Approximate match", "1"), ("Approximate match - candidate", "3"), ("Approximate match - candidate", "2"),  # tied: all listed
+                   ("In stock", "4"), ("Not found in stock", "")]
+    assert rows[1][hdr.index("Inventory name")].startswith("BD Vacutainer")
+
+
+def test_warnings_use_approximate_match_but_not_for_ties():
+    from backend.exports import add_stock_warnings
+    stock = [_inv("1", "Gauze 4x4 sterile pack", qty=8), _inv("2", "Tape roll", qty=2), _inv("3", "Tape strip", qty=2)]
+    req = lambda rid, status, name, qty: {"request_id": rid, "status": status, "items": [{"item_name": name, "category": "", "quantity": qty}]}
+    reqs = [req("A", "Approved", "Gauze 4x4", 6), req("B", "Under Review", "gauze 4x4 sterile", 6), req("C", "Under Review", "Tape", 5),
+            req("D", "Under Review", "Scissors", 1), req("E", "Under Review", "Tape roll", 5)]
+    add_stock_warnings(reqs, stock)
+    w = {r["request_id"]: r for r in reqs}
+    assert w["A"]["warnings"] == []                                      # 6 of 8 fits
+    assert w["B"]["warnings"] == [{"item_name": "Gauze 4x4 sterile pack", "committed": 12, "in_stock": 8, "match": "approximate"}]  # A's approximate approval counts
+    assert w["C"]["warnings"] == [] and len(w["C"]["candidates"][0]["names"]) == 2  # "Tape" ties: only a note
+    assert w["D"]["unmatched"] == ["Scissors"] and w["D"]["warnings"] == []
+    assert w["E"]["warnings"][0]["match"] == "exact"

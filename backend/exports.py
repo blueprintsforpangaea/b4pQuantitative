@@ -58,17 +58,57 @@ def parse_requested_name(raw: str) -> Dict[str, Any]:
     return out
 
 
+_STOPWORDS = {"and", "with", "for", "the", "per", "from", "that", "this", "into", "are"}
+
+
+def significant_tokens(name: str) -> frozenset:
+    """Lowercase words of a name without punctuation, stopwords and short bits ('21 G' becomes '21g')."""
+    text = re.sub(r"[^a-z0-9]+", " ", name.casefold())
+    text = re.sub(r"(\d) (?=[a-z]\b)", r"\1", text)
+    return frozenset(t for t in text.split() if len(t) >= 3 and t not in _STOPWORDS)
+
+
+def find_match(requested: str, products: Dict[str, frozenset]):
+    """Resolve a requested name to inventory product names (keys of `products` are _norm names).
+
+    ("exact", [key])        same name ignoring case and spacing
+    ("approximate", [key])  every significant word of the request is in exactly one best-scoring name
+    ("candidates", [keys])  several names tie for best score: do not pick one
+    ("none", [])
+    Score is request words / inventory-name words, so the closest (shortest) containing name wins.
+    """
+    key = _norm(requested)
+    if key in products:
+        return "exact", [key]
+    want = significant_tokens(requested)
+    if not want:
+        return "none", []
+    scored = [(len(want) / len(tokens), k) for k, tokens in products.items() if want <= tokens]
+    if not scored:
+        return "none", []
+    best = max(score for score, _ in scored)
+    top = sorted(k for score, k in scored if score == best)
+    return ("approximate", top) if len(top) == 1 else ("candidates", top)
+
+
+def _products(items: List[Any]) -> Dict[str, frozenset]:
+    return {k: significant_tokens(k) for k in {_norm(i.name) for i in items}}
+
+
 def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
     """One row per (requested line, matching inventory row).
 
-    Requested names are free text and often carry a ' [Lot X, Box Y, Pallet Z]' suffix, so a line is
-    matched to inventory by name with the suffix removed, ignoring case and extra whitespace. Rows that
-    match the most of the requested lot, box and pallet come first, then the earliest expiration. Lines with no match in stock still get a row.
+    Requested names are free text and often carry a ' [Lot X, Box Y, Pallet Z]' suffix. A line is matched
+    to in-stock inventory by exact name (suffix removed, case and spacing ignored); failing that by
+    significant words ("Approximate match"), and when several different names tie every one is listed
+    as a candidate. Within a name, rows matching the most of the requested lot, box and pallet come
+    first, then the earliest expiration. Lines with no match still get a row.
     """
     by_name: Dict[str, List[Any]] = {}
     for i in items:
         if i.quantity > 0:
             by_name.setdefault(_norm(i.name), []).append(i)
+    products = {k: significant_tokens(k) for k in by_name}
     rows = []
     for line in request["items"]:
         want = parse_requested_name(line["item_name"])
@@ -85,48 +125,71 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
         def exact(i):
             return any(asked) and score(i) == sum(asked)
 
-        matches = sorted(by_name.get(_norm(want["name"]), []), key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
+        kind, keys = find_match(want["name"], products)
+        label = {"exact": "In stock", "approximate": "Approximate match", "candidates": "Approximate match - candidate"}.get(kind)
+        ranked = lambda k: sorted(by_name[k], key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
+        # exact/approximate: several rows of the one product; candidates: the best row of each tied product
+        matches = ranked(keys[0])[:MAX_MATCHES_PER_LINE] if kind in ("exact", "approximate") else [ranked(k)[0] for k in keys[:MAX_MATCHES_PER_LINE]]
         if not matches:
-            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "Not found in stock", "", "", "", "", "", "", *extra, "", ""])
-        for m in matches[:MAX_MATCHES_PER_LINE]:
-            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "In stock", m.id,
+            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "Not found in stock", "", "", "", "", "", "", *extra, "", "", ""])
+        for m in matches:
+            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], label, m.id,
                          m.quantity, m.pallet_number, m.category_box, m.box_number, m.expiration_date or "", *extra,
-                         "Yes" if exact(m) else "No", getattr(m, "lot_number", None) or ""])
+                         "Yes" if exact(m) else "No", getattr(m, "lot_number", None) or "", m.name])
     return to_csv(["Request", "Organization", "Requested item", "Quantity requested", "Match", "Supply ID",
                    "On hand", "Pallet", "Box category", "Box number", "Expiration date",
-                   "Requested lot", "Requested box", "Requested pallet", "In requested lot, box and pallet", "Lot"], rows)
+                   "Requested lot", "Requested box", "Requested pallet", "In requested lot, box and pallet", "Lot",
+                   "Inventory name"], rows)
 
 
 def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None:
-    """Add request['warnings'] and request['unmatched'] to open requests (Under Review / Approved). Display only.
+    """Add request['warnings'], ['unmatched'] and ['candidates'] to open requests (Under Review / Approved). Display only.
 
-    For each line: committed = quantity of that item already approved on *other* requests + this line.
-    If committed exceeds what is in stock (names matched as in the packing list) the line is listed.
+    Each line is resolved to an inventory product as in the packing list. For a resolved line,
+    committed = quantity of that product already approved on *other* requests + this request's lines for it;
+    if committed exceeds the stock total the line is listed in warnings (with match "exact" or
+    "approximate"). A name matching no product is listed in unmatched; one matching several equally
+    close products is listed in candidates (no shortage is claimed for it).
     """
+    products = _products(items)
     stock: Dict[str, int] = {}
-    known = {_norm(i.name) for i in items}  # an item that exists but has 0 on hand is a real shortage
+    shown: Dict[str, str] = {}
     for i in items:
-        stock[_norm(i.name)] = stock.get(_norm(i.name), 0) + max(i.quantity, 0)
-    key = lambda raw: _norm(parse_requested_name(raw)["name"])
+        k = _norm(i.name)
+        stock[k] = stock.get(k, 0) + max(i.quantity, 0)
+        shown.setdefault(k, i.name)
+    resolved: Dict[str, Any] = {}
+
+    def resolve(raw):
+        if raw not in resolved:
+            resolved[raw] = find_match(parse_requested_name(raw)["name"], products)
+        return resolved[raw]
+
     approved: Dict[str, int] = {}
     for r in requests:
         if r["status"] == "Approved":
             for line in r["items"]:
-                approved[key(line["item_name"])] = approved.get(key(line["item_name"]), 0) + line["quantity"]
+                kind, keys = resolve(line["item_name"])
+                if kind in ("exact", "approximate"):
+                    approved[keys[0]] = approved.get(keys[0], 0) + line["quantity"]
     for r in requests:
-        warnings, unmatched = [], []
+        warnings, unmatched, candidates = [], [], []
         if r["status"] in ("Under Review", "Approved"):
             this: Dict[str, int] = {}
+            kinds: Dict[str, str] = {}
             for line in r["items"]:
-                this[key(line["item_name"])] = this.get(key(line["item_name"]), 0) + line["quantity"]
+                kind, keys = resolve(line["item_name"])
+                name = parse_requested_name(line["item_name"])["name"]
+                if kind == "none":
+                    unmatched.append(name)
+                elif kind == "candidates":
+                    candidates.append({"item_name": name, "names": [shown[k] for k in keys[:5]]})
+                else:
+                    this[keys[0]] = this.get(keys[0], 0) + line["quantity"]
+                    kinds[keys[0]] = "exact" if kinds.get(keys[0], kind) == "exact" and kind == "exact" else "approximate"
             for k, qty in this.items():
-                if k not in known:
-                    unmatched.append(next(parse_requested_name(l["item_name"])["name"] for l in r["items"] if key(l["item_name"]) == k))
-                    continue
                 others = approved.get(k, 0) - (qty if r["status"] == "Approved" else 0)
                 committed, in_stock = others + qty, stock.get(k, 0)
                 if committed > in_stock:
-                    name = next(l["item_name"] for l in r["items"] if key(l["item_name"]) == k)
-                    warnings.append({"item_name": parse_requested_name(name)["name"], "committed": committed, "in_stock": in_stock})
-        r["warnings"] = warnings
-        r["unmatched"] = unmatched  # lines whose name matches no inventory item (neutral note, not a shortage)
+                    warnings.append({"item_name": shown[k], "committed": committed, "in_stock": in_stock, "match": kinds[k]})
+        r["warnings"], r["unmatched"], r["candidates"] = warnings, unmatched, candidates

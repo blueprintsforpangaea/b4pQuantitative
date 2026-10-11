@@ -123,6 +123,16 @@ describe("Requests", () => {
     expect(screen.queryByText(/would commit/)).toBeNull();
   });
 
+  it("labels approximate-match warnings and lists tied candidates", async () => {
+    sessionStorage.setItem("b4p-admin-token", "t");
+    fetch.mockReturnValue(json({ ...data, requests: [{ ...data.requests[0],
+      warnings: [{ item_name: "Gauze 4x4 sterile pack", committed: 12, in_stock: 8, match: "approximate" }],
+      candidates: [{ item_name: "Tape", names: ["Tape roll", "Tape strip"] }] }] }));
+    render(<Requests />);
+    expect(await screen.findByText("Approving this would commit 12 of 8 in stock (approximate match): Gauze 4x4 sterile pack")).toBeTruthy();
+    expect(screen.getByText("Could be several inventory items; check the name: Tape (Tape roll; Tape strip)")).toBeTruthy();
+  });
+
   it("shows an empty state for a filter with no requests", async () => {
     sessionStorage.setItem("b4p-admin-token", "t");
     fetch.mockReturnValue(json({ ...data, requests: [] }));
