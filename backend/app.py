@@ -106,6 +106,7 @@ class Item(BaseModel):
     pallet_number: int
     category_box: str
     box_number: int
+    lot_number: Optional[str] = None
 
     @field_validator("image_url")
     @classmethod
@@ -386,6 +387,7 @@ def fetch_items_from_sheet() -> List[Item]:
                 pallet_number=parse_int(row.get("Pallet Number"), default=0),
                 category_box=(row.get("Box Category") or "").strip() or "Unassigned",
                 box_number=parse_int(row.get("Box Number"), default=0),
+                lot_number=(row.get("Lot Number") or "").strip() or None,
             )
             items.append(item)
         except Exception as e:

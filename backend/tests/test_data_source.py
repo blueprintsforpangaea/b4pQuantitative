@@ -649,7 +649,7 @@ def test_packing_list_handles_suffix_case_and_whitespace():
     hdr = rows[0]
     col = lambda r, name: r[hdr.index(name)]
     assert [col(r, "Supply ID") for r in rows[1:3]] == ["1", "2"]  # requested box/pallet first, then the other stock
-    assert [col(r, "In requested box and pallet") for r in rows[1:3]] == ["Yes", "No"]
+    assert [col(r, "In requested lot, box and pallet") for r in rows[1:3]] == ["No", "No"]  # these rows carry no lot, so the lot can't match
     assert col(rows[1], "Requested lot") == "L9" and col(rows[1], "Requested box") == "1"
     assert col(rows[3], "Match") == "In stock" and col(rows[3], "Supply ID") == "3"  # case and spacing ignored
     assert col(rows[4], "Match") == "Not found in stock"
@@ -713,3 +713,26 @@ def test_bracketed_inventory_names_still_match():
     assert [r[4] for r in rows[1:]] == ["In stock", "In stock"]
     add_stock_warnings([req], stock)
     assert req["unmatched"] == [] and req["warnings"] == []
+
+
+def test_packing_list_prefers_the_exact_lot():
+    from backend.exports import packing_list_csv
+    mk = lambda id, lot, exp, pal, box: _it(id, 5, exp).model_copy(update={"name": "Gauze", "lot_number": lot, "pallet_number": pal, "box_number": box})
+    items = [mk("1", "A1", "2026-01-01", 1, 1),   # earliest expiry, wrong lot, right box/pallet
+             mk("2", "L9", "2027-01-01", 1, 1),   # exact lot, box and pallet
+             mk("3", "L9", "2026-06-01", 2, 5),   # right lot only
+             mk("4", None, "2026-02-01", 3, 3)]
+    req = {"request_id": "R", "org_name": "O", "items": [{"item_name": "gauze [Lot l9, Box 1, Pallet 1]", "category": "", "quantity": 1}]}
+    rows = _rows(packing_list_csv(req, items))
+    hdr = rows[0]
+    ids = [r[hdr.index("Supply ID")] for r in rows[1:]]
+    assert ids == ["2", "1", "3", "4"]  # 3 of 3 matches, then 2 of 3 (box+pallet), then 1 (lot), then none
+    flags = [r[hdr.index("In requested lot, box and pallet")] for r in rows[1:]]
+    assert flags == ["Yes", "No", "No", "No"]
+    assert rows[1][hdr.index("Lot")] == "L9"
+
+
+@needs_db
+def test_items_expose_lot_number(db_mode):
+    items = client.get("/items").json()
+    assert any(i["lot_number"] for i in items) and all("lot_number" in i for i in items)

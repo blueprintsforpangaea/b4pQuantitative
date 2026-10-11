@@ -62,9 +62,8 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
     """One row per (requested line, matching inventory row).
 
     Requested names are free text and often carry a ' [Lot X, Box Y, Pallet Z]' suffix, so a line is
-    matched to inventory by name with the suffix removed, ignoring case and extra whitespace. Rows in
-    the requested box and pallet come first (inventory has no lot number, so the lot is only echoed
-    back for the packer), then the earliest expiration. Lines with no match in stock still get a row.
+    matched to inventory by name with the suffix removed, ignoring case and extra whitespace. Rows that
+    match the most of the requested lot, box and pallet come first, then the earliest expiration. Lines with no match in stock still get a row.
     """
     by_name: Dict[str, List[Any]] = {}
     for i in items:
@@ -75,20 +74,27 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
         want = parse_requested_name(line["item_name"])
         extra = [want["lot"], want["box"] if want["box"] is not None else "", want["pallet"] if want["pallet"] is not None else ""]
 
-        def exact(i):
-            return (want["box"] is None or i.box_number == want["box"]) and (want["pallet"] is None or i.pallet_number == want["pallet"]) \
-                and (want["box"] is not None or want["pallet"] is not None)
+        def score(i):
+            """How many of the requested lot / box / pallet this inventory row matches (lot compared casefolded)."""
+            return ((bool(want["lot"]) and (getattr(i, "lot_number", None) or "").casefold() == want["lot"].casefold())
+                    + (want["box"] is not None and i.box_number == want["box"])
+                    + (want["pallet"] is not None and i.pallet_number == want["pallet"]))
 
-        matches = sorted(by_name.get(_norm(want["name"]), []), key=lambda i: (not exact(i), i.expiration_date or "9999-12-31", i.id))
+        asked = (bool(want["lot"]), want["box"] is not None, want["pallet"] is not None)
+
+        def exact(i):
+            return any(asked) and score(i) == sum(asked)
+
+        matches = sorted(by_name.get(_norm(want["name"]), []), key=lambda i: (-score(i), i.expiration_date or "9999-12-31", i.id))
         if not matches:
-            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "Not found in stock", "", "", "", "", "", "", *extra, ""])
+            rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "Not found in stock", "", "", "", "", "", "", *extra, "", ""])
         for m in matches[:MAX_MATCHES_PER_LINE]:
             rows.append([request["request_id"], request["org_name"], line["item_name"], line["quantity"], "In stock", m.id,
                          m.quantity, m.pallet_number, m.category_box, m.box_number, m.expiration_date or "", *extra,
-                         "Yes" if exact(m) else "No"])
+                         "Yes" if exact(m) else "No", getattr(m, "lot_number", None) or ""])
     return to_csv(["Request", "Organization", "Requested item", "Quantity requested", "Match", "Supply ID",
                    "On hand", "Pallet", "Box category", "Box number", "Expiration date",
-                   "Requested lot", "Requested box", "Requested pallet", "In requested box and pallet"], rows)
+                   "Requested lot", "Requested box", "Requested pallet", "In requested lot, box and pallet", "Lot"], rows)
 
 
 def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None:

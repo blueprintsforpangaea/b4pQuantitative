@@ -92,7 +92,7 @@ Open requests (Under Review or Approved) show an amber note such as "Approving t
 ### CSV exports
 
 - **Stock Alerts > Download expiring CSV:** expired items plus items expiring within the selected window, with location (pallet, box category, box number).
-- **Requests > CSV (per request):** a packing list. Each requested item is matched by name (ignoring case, extra spaces and a trailing "[Lot ..., Box ..., Pallet ...]" that the partner site adds) to items in stock. Rows in the requested box and pallet come first, then the earliest expiration, with pallet and box numbers. The inventory has no lot numbers, so the requested lot is only shown for the packer. Items that are not found in stock are marked as such, so check those by hand. Requested names are typed by partners, so a spelling that differs by more than case and spacing will not match.
+- **Requests > CSV (per request):** a packing list. Each requested item is matched by name (ignoring case, extra spaces and a trailing "[Lot ..., Box ..., Pallet ...]" that the partner site adds) to items in stock. Rows that match the most of the requested lot, box and pallet come first, then the earliest expiration, with pallet, box and lot numbers. Items that are not found in stock are marked as such, so check those by hand. Requested names are typed by partners, so a spelling that differs by more than case and spacing will not match.
 
 ### Admin token setup (Requests tab and its CSVs)
 
