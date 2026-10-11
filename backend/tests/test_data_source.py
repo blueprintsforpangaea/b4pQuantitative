@@ -392,7 +392,9 @@ def test_requests_need_admin_and_db(monkeypatch):
     assert client.get("/requests").status_code == 503  # sheet mode: no DATABASE_URL
     assert anon.post("/requests/X/status", json={"status": "Approved"}).status_code == 401
     monkeypatch.delenv("ADMIN_TOKEN")
-    assert client.get("/requests").status_code == 403
+    r = client.get("/requests")
+    assert r.status_code == 403 and r.json()["detail"] == "Admin features are disabled (ADMIN_TOKEN not set)."
+    assert client.post("/items/A1/quantity", json={"quantity": 1}).json()["detail"] == "Admin features are disabled (ADMIN_TOKEN not set)."
 
 
 @needs_db

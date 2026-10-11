@@ -641,7 +641,7 @@ def update_quantity_in_db(item_id: str, quantity: int) -> QuantityUpdateResponse
 def require_admin(x_admin_token: Optional[str] = Header(None)):
     token = (os.getenv("ADMIN_TOKEN") or "").strip()
     if not token:
-        raise HTTPException(status_code=403, detail="Quantity editing is disabled (ADMIN_TOKEN not set).")
+        raise HTTPException(status_code=403, detail="Admin features are disabled (ADMIN_TOKEN not set).")
     if not hmac.compare_digest((x_admin_token or "").encode(), token.encode()):
         raise HTTPException(status_code=401, detail="Admin token required.")
 
