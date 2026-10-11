@@ -59,7 +59,9 @@ export default function Requests() {
     });
     if (!r.ok) {
       const detail = (await r.json().catch(() => ({}))).detail;
-      setNotice(`Could not update ${id}: ${detail || r.status}`);
+      // FastAPI sends a string for HTTP errors and a list of {msg} objects for validation errors.
+      const text = Array.isArray(detail) ? detail.map((d) => d.msg || String(d)).join("; ") : detail;
+      setNotice(`Could not update ${id}: ${text || r.status}`);
     } else {
       setNotice(`${id} is now ${status}.`);
     }

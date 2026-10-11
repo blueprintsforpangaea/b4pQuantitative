@@ -553,7 +553,7 @@ function buildInventoryRows(items) {
     category: item.category || "Uncategorized",
     reviewStatus: item.review_status || "",
     needsReview: (item.review_status || "").trim().toLowerCase() === "review needed",
-    imageUrl: item.image_url || "",
+    imageUrl: /^https?:\/\//i.test(item.image_url || "") ? item.image_url : "",
     locationInfo: `Pallet ${item.pallet_number || "N/A"} - ${item.category_box || "Unassigned"} #${item.box_number || "N/A"}`,
     expirationDate: formatExpiration(item.expiration_date),
     expirationRaw: item.expiration_date || null,

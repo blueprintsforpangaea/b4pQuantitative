@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
-const money = (v) =>
-  v ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(v) : "Price unknown";
+// "Price unknown" depends on whether a unit price exists, not on the total (a zero-quantity row is $0 but priced).
+const money = (total, priced) =>
+  priced ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(total) : "Price unknown";
 
 function dueLabel(days) {
   if (days === null || days === undefined) return "No expiration date";
@@ -45,7 +46,7 @@ function AlertTable({ title, rows, empty, showDays }) {
                   <td>{showDays ? `${r.expiration_date} (${dueLabel(r.days_left)})` : r.quantity}</td>
                   <td>{showDays ? r.quantity : r.expiration_date ? `${r.expiration_date} (${dueLabel(r.days_left)})` : "No expiration date"}</td>
                   <td>P{r.pallet_number} / {r.category_box} / Box {r.box_number}</td>
-                  <td>{money(r.total_value)}</td>
+                  <td>{money(r.total_value, r.unit_value)}</td>
                 </tr>
               ))}
             </tbody>
@@ -108,8 +109,8 @@ export default function StockAlerts() {
         </div>
       </div>
       <div className="metrics-grid metrics-grid-primary">
-        <div className="metric-card"><p className="metric-label">Expired</p><p className="metric-value">{s.expired.units.toLocaleString()} units</p><p className="metric-label">{s.expired.entries} entries, {money(s.expired.value)}</p></div>
-        <div className="metric-card"><p className="metric-label">Expiring in {data.soon_days} days</p><p className="metric-value">{s.expiring_soon.units.toLocaleString()} units</p><p className="metric-label">{s.expiring_soon.entries} entries, {money(s.expiring_soon.value)}</p></div>
+        <div className="metric-card"><p className="metric-label">Expired</p><p className="metric-value">{s.expired.units.toLocaleString()} units</p><p className="metric-label">{s.expired.entries} entries, {money(s.expired.value, s.expired.priced)}</p></div>
+        <div className="metric-card"><p className="metric-label">Expiring in {data.soon_days} days</p><p className="metric-value">{s.expiring_soon.units.toLocaleString()} units</p><p className="metric-label">{s.expiring_soon.entries} entries, {money(s.expiring_soon.value, s.expiring_soon.priced)}</p></div>
         <div className="metric-card"><p className="metric-label">Low stock</p><p className="metric-value">{s.low_stock.entries.toLocaleString()} entries</p><p className="metric-label">{s.low_stock.units.toLocaleString()} units left</p></div>
       </div>
       <div style={{ display: "grid", gap: "16px", marginTop: "16px" }}>

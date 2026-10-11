@@ -339,7 +339,7 @@ def test_alert_buckets_and_boundaries():
     assert [x["id"] for x in r["expired"]] == ["b", "a"]  # expiring today counts as expired, most overdue first
     assert [x["id"] for x in r["expiring_soon"]] == ["c", "d"]
     assert [x["id"] for x in r["low_stock_items"]] == ["h", "g"]
-    assert r["summary"]["expired"] == {"entries": 2, "units": 18, "value": 0.0}
+    assert r["summary"]["expired"] == {"entries": 2, "priced": 0, "units": 18, "value": 0.0}
 
 
 @needs_db
@@ -472,3 +472,58 @@ def test_sync_status_matches_view(db_mode):
     assert str(body["active_items"]) == q("select active_items from dash_sync_status")
     assert (body["last_success_at"] is None) == (q("select last_success_at from dash_sync_status") == "")
     assert body["last_run_ok"] is (q("select last_run_ok from dash_sync_status") == "t")
+
+
+# ---- bug-hunter fixes ----
+def test_unassigned_items_do_not_count_as_pallet_or_box(monkeypatch):
+    mk = lambda id, pal, cat, box: _it(id, 1, None).model_copy(update={"pallet_number": pal, "category_box": cat, "box_number": box})
+    items = [mk("1", 1, "A", 1), mk("2", 1, "A", 1), mk("3", 2, "B", 2), mk("4", 0, "Unassigned", 0), mk("5", 2, "Unassigned", 0)]
+    monkeypatch.setattr(appmod, "load_items", lambda response: items)
+    k = client.get("/kpis").json()
+    assert (k["pallet_count"], k["box_count"]) == (2, 2)
+
+
+@needs_db
+def test_kpi_pallets_boxes_match_v_kpis_with_unassigned_items(copy_db):
+    psql = lambda sql: subprocess.run(["psql", TEST_DB, "-Atc", sql], capture_output=True, text=True).stdout.strip()
+    psql("update inventory_item set box_id = NULL where item_id in (select item_id from inventory_item order by item_id limit 15)")
+    k = client.get("/kpis").json()
+    assert f"{k['pallet_count']}|{k['box_count']}" == psql("select pallet_count || '|' || box_count from v_kpis")
+
+
+def test_javascript_image_urls_are_dropped():
+    for bad in ("javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,x", "//evil.example/x"):
+        assert _it("x", 1, None).model_copy().__class__(**{**_it("x", 1, None).model_dump(), "image_url": bad}).image_url is None
+    ok = "https://drive.google.com/file/d/abc/view"
+    assert appmod.Item(**{**_it("x", 1, None).model_dump(), "image_url": ok}).image_url == ok
+
+
+def test_sheet_mode_accepts_zero_quantity(monkeypatch):
+    class WS:
+        def row_values(self, n): return ["Supply ID", "Quantity", "Total Price", "Price per unit"]
+        def get_all_records(self): return [{"Supply ID": "A1", "Price per unit": "2"}]
+        def batch_update(self, updates, **kw): self.updates = updates
+    ws = WS()
+    monkeypatch.setattr(appmod, "get_gspread_worksheet", lambda *a, **k: ws)
+    monkeypatch.setattr(appmod, "gspread", type("G", (), {"utils": type("U", (), {"rowcol_to_a1": staticmethod(lambda r, c: f"R{r}C{c}")})}))
+    r = client.post("/items/A1/quantity", json={"quantity": 0})
+    assert r.status_code == 200 and r.json()["quantity"] == 0
+    assert client.post("/items/A1/quantity", json={"quantity": -1}).status_code == 422
+
+
+@needs_db
+def test_status_response_is_canonical(copy_db):
+    rid = subprocess.run(["psql", TEST_DB, "-Atc", 'select "Request ID" from dash_requests limit 1'], capture_output=True, text=True).stdout.strip()
+    assert client.post(f"/requests/{rid}/status", json={"status": "approved"}).json()["status"] == "Approved"
+    assert client.post(f"/requests/{rid}/status", json={"status": "SHIPPED"}).json()["status"] == "Shipped"
+
+
+def test_alerts_skip_zero_quantity_and_flag_priced():
+    t = date(2026, 10, 11)
+    priced = _it("p", 0, (t - timedelta(days=3)).isoformat()).model_copy(update={"unit_value": 2.0})
+    live = _it("q", 2, (t - timedelta(days=3)).isoformat()).model_copy(update={"unit_value": 2.0, "total_value": 4.0})
+    soon = _it("s", 0, (t + timedelta(days=3)).isoformat())
+    r = build_alerts([priced, live, soon], today=t)
+    assert [x["id"] for x in r["expired"]] == ["q"] and r["expiring_soon"] == []
+    assert r["summary"]["expired"]["priced"] == 1
+    assert [x["id"] for x in r["low_stock_items"]] == ["p", "s", "q"]  # low stock still lists zero-quantity rows

@@ -1,6 +1,6 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import requests
@@ -104,6 +104,14 @@ class Item(BaseModel):
     pallet_number: int
     category_box: str
     box_number: int
+
+    @field_validator("image_url")
+    @classmethod
+    def only_web_links(cls, value):
+        """Photo links end up in an href; anything but http(s) (e.g. javascript:) is dropped."""
+        if value and not re.match(r"^https?://", value.strip(), re.IGNORECASE):
+            return None
+        return value
 
 
 class KPIResponse(BaseModel):
@@ -269,8 +277,8 @@ def get_gspread_worksheet(gid: str = SHEET_GID):
 
 
 def update_sheet_quantity(item_id: str, quantity: int) -> QuantityUpdateResponse:
-    if quantity <= 0:
-        raise HTTPException(status_code=400, detail="Quantity must be greater than 0.")
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative.")
 
     worksheet = get_gspread_worksheet()
     records = worksheet.get_all_records()
@@ -504,8 +512,10 @@ def calculate_kpis(response: Response):
     else:
         avg_duration = 0.0
 
-    pallets = len(set(i.pallet_number for i in items_db))
-    boxes = len(set((i.pallet_number, i.category_box, i.box_number) for i in items_db))
+    # Items without a known pallet/box (0 or 'Unassigned') are not a pallet or box of their own.
+    pallets = len(set(i.pallet_number for i in items_db if i.pallet_number > 0))
+    boxes = len(set((i.pallet_number, i.category_box, i.box_number)
+                    for i in items_db if i.box_number > 0 and i.category_box != "Unassigned"))
 
     # ==============================
     # EXPIRY CALCULATIONS
@@ -669,7 +679,7 @@ def list_requests():
 @app.post("/requests/{request_id}/status", dependencies=[Depends(require_admin), Depends(require_db)])
 def update_request_status(request_id: str, payload: RequestStatusUpdate):
     try:
-        found = db.set_request_status(request_id, payload.status)
+        found, status = db.set_request_status(request_id, payload.status)
         clear_items_cache()  # any write through this API starts the next read from the database
     except db.OperationalError as exc:
         logger.error("Postgres unavailable on request status update: %s", exc)
@@ -682,4 +692,4 @@ def update_request_status(request_id: str, payload: RequestStatusUpdate):
         raise HTTPException(status_code=400, detail="Invalid status.") from exc
     if not found:
         raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
-    return {"request_id": request_id, "status": payload.status}
+    return {"request_id": request_id, "status": status}

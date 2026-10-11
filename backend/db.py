@@ -52,10 +52,18 @@ def fetch_request_lines() -> List[Dict[str, Any]]:
         return conn.execute("SELECT * FROM dash_requests").fetchall()
 
 
-def set_request_status(request_id: str, status: str) -> bool:
-    """set_request_status(): False if the request does not exist. Raises db.Error for bad/forbidden changes."""
+def set_request_status(request_id: str, status: str):
+    """set_request_status(): (found, stored status). found is False if the request does not exist.
+
+    Raises db.Error for bad/forbidden changes. The status is read back so aliases ('pending',
+    'approved') come back in their canonical form.
+    """
     with _connect() as conn:
-        return conn.execute("SELECT set_request_status(%s, %s) AS ok", (request_id, status)).fetchone()["ok"]
+        found = conn.execute("SELECT set_request_status(%s, %s) AS ok", (request_id, status)).fetchone()["ok"]
+        if not found:
+            return False, None
+        row = conn.execute('SELECT "Status" FROM dash_requests WHERE "Request ID" = %s LIMIT 1', (request_id,)).fetchone()
+        return True, row["Status"] if row else status
 
 
 def fetch_sync_status() -> Dict[str, Any]:
