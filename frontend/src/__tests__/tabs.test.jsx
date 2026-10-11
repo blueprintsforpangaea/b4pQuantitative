@@ -115,6 +115,14 @@ describe("Requests", () => {
     expect(screen.getByLabelText("Change status of REQ-1").disabled).toBe(false); // display only, never blocks
   });
 
+  it("shows a neutral note, not a shortage, for names that match no inventory item", async () => {
+    sessionStorage.setItem("b4p-admin-token", "t");
+    fetch.mockReturnValue(json({ ...data, requests: [{ ...data.requests[0], warnings: [], unmatched: ["Gauzze"] }] }));
+    render(<Requests />);
+    expect(await screen.findByText("Not matched to any inventory item; check the name: Gauzze")).toBeTruthy();
+    expect(screen.queryByText(/would commit/)).toBeNull();
+  });
+
   it("shows an empty state for a filter with no requests", async () => {
     sessionStorage.setItem("b4p-admin-token", "t");
     fetch.mockReturnValue(json({ ...data, requests: [] }));

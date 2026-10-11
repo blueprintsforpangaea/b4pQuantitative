@@ -91,12 +91,13 @@ def packing_list_csv(request: Dict[str, Any], items: List[Any]) -> str:
 
 
 def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None:
-    """Add request['warnings'] to open requests (Under Review / Approved). Display only.
+    """Add request['warnings'] and request['unmatched'] to open requests (Under Review / Approved). Display only.
 
     For each line: committed = quantity of that item already approved on *other* requests + this line.
     If committed exceeds what is in stock (names matched as in the packing list) the line is listed.
     """
     stock: Dict[str, int] = {}
+    known = {_norm(i.name) for i in items}  # an item that exists but has 0 on hand is a real shortage
     for i in items:
         stock[_norm(i.name)] = stock.get(_norm(i.name), 0) + max(i.quantity, 0)
     key = lambda raw: _norm(parse_requested_name(raw)["name"])
@@ -106,15 +107,19 @@ def add_stock_warnings(requests: List[Dict[str, Any]], items: List[Any]) -> None
             for line in r["items"]:
                 approved[key(line["item_name"])] = approved.get(key(line["item_name"]), 0) + line["quantity"]
     for r in requests:
-        warnings = []
+        warnings, unmatched = [], []
         if r["status"] in ("Under Review", "Approved"):
             this: Dict[str, int] = {}
             for line in r["items"]:
                 this[key(line["item_name"])] = this.get(key(line["item_name"]), 0) + line["quantity"]
             for k, qty in this.items():
+                if k not in known:
+                    unmatched.append(next(parse_requested_name(l["item_name"])["name"] for l in r["items"] if key(l["item_name"]) == k))
+                    continue
                 others = approved.get(k, 0) - (qty if r["status"] == "Approved" else 0)
                 committed, in_stock = others + qty, stock.get(k, 0)
                 if committed > in_stock:
                     name = next(l["item_name"] for l in r["items"] if key(l["item_name"]) == k)
                     warnings.append({"item_name": parse_requested_name(name)["name"], "committed": committed, "in_stock": in_stock})
         r["warnings"] = warnings
+        r["unmatched"] = unmatched  # lines whose name matches no inventory item (neutral note, not a shortage)

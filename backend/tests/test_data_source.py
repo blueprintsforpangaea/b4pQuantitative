@@ -668,7 +668,7 @@ def test_over_commit_warnings():
     assert w["B"] == [{"item_name": "nitrile  gloves medium", "committed": 12, "in_stock": 8}]  # 6 + 6 of 8
     assert w["C"] == []                                                    # 6 + 2 = 8 fits exactly
     assert w["D"] == []                                                    # closed requests get no warning
-    assert w["E"] == [{"item_name": "Tape", "committed": 1, "in_stock": 0}]
+    assert w["E"] == [{"item_name": "Tape", "committed": 1, "in_stock": 0}]  # known item, none on hand: real shortage
 
 
 def test_approved_request_warns_when_approvals_exceed_stock():
@@ -688,3 +688,13 @@ def test_requests_endpoint_includes_warnings(copy_db):
     psql(f"select create_request('Warn Org', 'w@example.org', jsonb_build_array(jsonb_build_object('item_name', '{n}', 'quantity', {int(qty) + 1})))")
     mine = [r for r in client.get("/requests").json()["requests"] if r["org_name"] == "Warn Org"][0]
     assert mine["warnings"] and mine["warnings"][0]["committed"] == int(qty) + 1
+
+
+def test_unmatched_names_get_a_note_not_a_warning():
+    from backend.exports import add_stock_warnings
+    stock = [_it("1", 8, None).model_copy(update={"name": "Gauze"})]
+    reqs = [{"request_id": "A", "status": "Under Review", "items": [
+        {"item_name": "Gauze", "category": "", "quantity": 2},
+        {"item_name": "Gauzze [Lot 1, Box 2, Pallet 1]", "category": "", "quantity": 99}]}]
+    add_stock_warnings(reqs, stock)
+    assert reqs[0]["warnings"] == [] and reqs[0]["unmatched"] == ["Gauzze"]

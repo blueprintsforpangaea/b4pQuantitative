@@ -129,6 +129,11 @@ export default function Requests() {
                         {r.status === "Approved" ? "Approved requests commit" : "Approving this would commit"} {w.committed} of {w.in_stock} in stock: {w.item_name}
                       </p>
                     ))}
+                    {(r.unmatched || []).map((name) => (
+                      <p key={name} className="stock-note" style={{ color: "#6b6b6b", margin: "6px 0 0" }}>
+                        Not matched to any inventory item; check the name: {name}
+                      </p>
+                    ))}
                   </td>
                   <td>{new Date(r.timestamp).toLocaleDateString()}</td>
                   <td>{r.status}</td>

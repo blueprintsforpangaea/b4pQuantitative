@@ -87,7 +87,7 @@ The dashboard has six tabs.
 
 The header shows when the inventory was last copied from the Google Sheet. If the latest attempt failed it shows the last successful sync and says the latest attempt failed.
 
-Open requests (Under Review or Approved) show an amber note such as "Approving this would commit 12 of 8 in stock" when the quantity already approved for that item on other requests, plus this one, is more than what is in stock (names matched as in the packing list). It is only a warning: it never blocks a status change, and inventory is not reduced when a request is Shipped.
+Open requests (Under Review or Approved) show an amber note such as "Approving this would commit 12 of 8 in stock" when the quantity already approved for that item on other requests, plus this one, is more than what is in stock (names matched as in the packing list). A line whose name matches no inventory item at all gets a neutral "Not matched to any inventory item; check the name" note instead. It is only a warning: it never blocks a status change, and inventory is not reduced when a request is Shipped.
 
 ### CSV exports
 
