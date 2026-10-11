@@ -1647,7 +1647,12 @@ export default function App() {
       ]);
 
       if (!itemsResponse.ok || !kpisResponse.ok) {
-        throw new Error("The dashboard could not load data from the backend.");
+        const failed = itemsResponse.ok ? kpisResponse : itemsResponse;
+        throw new Error(
+          failed.status === 503
+            ? "The inventory database is unavailable right now. Please retry in a minute."
+            : "The dashboard could not load data from the backend.",
+        );
       }
 
       const [itemsData, kpisData] = await Promise.all([
