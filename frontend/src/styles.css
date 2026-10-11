@@ -3189,3 +3189,98 @@ thead th {
     max-width: 100%;
   }
 }
+
+/* Requests: let cells wrap so every column, including the packing-list button, fits at 1280px. */
+.requests-table th,
+.requests-table td,
+.alerts-table th,
+.alerts-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+@media (max-width: 900px) {
+  .title-block-cell.sync-cell {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--bp-line);
+  }
+}
+
+.requests-table,
+.alerts-table {
+  min-width: 0; /* the global table rule forces 1320px */
+}
+
+/* The global per-column table rules are tuned for the inventory table; reset them for requests. */
+.requests-table th:nth-child(n),
+.requests-table td:nth-child(n),
+.alerts-table th:nth-child(n),
+.alerts-table td:nth-child(n) {
+  width: auto;
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
+.requests-table th:nth-child(3),
+.requests-table td:nth-child(3) {
+  min-width: 200px;
+}
+
+.alerts-table th,
+.alerts-table td {
+  vertical-align: top;
+}
+
+/* In the stacked (column) layout a "flex: 1 1 420px" basis becomes a 420px HEIGHT; keep controls their natural height. */
+@media (max-width: 720px) {
+  .create-shipment-bar > *,
+  .create-shipment-bar .search-input {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Requests as stacked cards on phones instead of a sideways-scrolling table. */
+@media (max-width: 720px) {
+  .requests-table,
+  .requests-table tbody,
+  .requests-table tr,
+  .requests-table th[scope="row"],
+  .requests-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .requests-table thead {
+    position: absolute;
+    left: -9999px; /* hidden visually, still read by screen readers */
+  }
+
+  .requests-table tr {
+    border: 1px solid #ececec;
+    border-radius: 14px;
+    margin-bottom: 14px;
+    padding: 6px 0;
+    background: #fff;
+  }
+
+  .requests-table th[scope="row"],
+  .requests-table td {
+    border-bottom: 0;
+    padding: 6px 14px;
+  }
+
+  .requests-table [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #8f8f8f;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+}

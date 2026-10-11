@@ -115,14 +115,14 @@ export default function Requests() {
       {notice ? <p className="empty-state" role="status" aria-live="polite" tabIndex={-1} ref={noticeRef}>{notice}</p> : null}
       {shown.length === 0 ? <p className="empty-state">No requests match this filter.</p> : (
         <div className="shipment-kpi-table-wrap" style={{ overflowX: "auto", maxHeight: "none" }}>
-          <table className="shipment-kpi-table" aria-label="Partner supply requests">
+          <table className="shipment-kpi-table requests-table" aria-label="Partner supply requests">
             <thead><tr>{["Request", "Organization", "Items", "Submitted", "Status", "Change status", "Packing list"].map((h) => <th scope="col" key={h}>{h}</th>)}</tr></thead>
             <tbody>
               {shown.map((r) => (
                 <tr key={r.request_id}>
-                  <th scope="row" style={{ fontWeight: "inherit", textAlign: "left" }}>{r.request_id}{r.review_flag ? " (flagged)" : ""}</th>
-                  <td>{r.org_name}<br /><small>{r.org_email || "no email"}</small></td>
-                  <td style={{ whiteSpace: "normal", minWidth: "260px" }}>
+                  <th scope="row" data-label="Request" style={{ fontWeight: "inherit", textAlign: "left" }}>{r.request_id}{r.review_flag ? " (flagged)" : ""}</th>
+                  <td data-label="Organization">{r.org_name}<br /><small>{r.org_email || "no email"}</small></td>
+                  <td data-label="Items" style={{ whiteSpace: "normal", minWidth: "200px" }}>
                     {r.items.map((i) => `${i.quantity} x ${i.item_name}`).join("; ")}
                     {(r.warnings || []).map((w) => (
                       <p key={w.item_name} className="stock-warning" style={{ color: "#8a4b00", margin: "6px 0 0" }}>
@@ -135,9 +135,9 @@ export default function Requests() {
                       </p>
                     ))}
                   </td>
-                  <td>{new Date(r.timestamp).toLocaleDateString()}</td>
-                  <td>{r.status}</td>
-                  <td>
+                  <td data-label="Submitted">{new Date(r.timestamp).toLocaleDateString()}</td>
+                  <td data-label="Status">{r.status}</td>
+                  <td data-label="Change status">
                     {NEXT[r.status]?.length ? (
                       <select value="" onChange={(e) => e.target.value && changeStatus(r.request_id, e.target.value)} aria-label={`Change status of ${r.request_id}`}>
                         <option value="">Choose…</option>
@@ -145,7 +145,7 @@ export default function Requests() {
                       </select>
                     ) : "Final"}
                   </td>
-                  <td>
+                  <td data-label="Packing list">
                     <button type="button" className="secondary-button" aria-label={`Download packing list for ${r.request_id}`} onClick={() => downloadCsv(`/requests/${encodeURIComponent(r.request_id)}/packing-list.csv`, token).catch((e) => setNotice(e.message))}>
                       CSV
                     </button>

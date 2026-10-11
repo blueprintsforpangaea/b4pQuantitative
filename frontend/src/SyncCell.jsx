@@ -39,7 +39,7 @@ export default function SyncCell({ fallbackLabel }) {
   // Always the last SUCCESSFUL sync; a failed latest attempt is said out loud.
   const text = !when ? "Never" : failed ? `Last successful sync ${ago(when)}; latest attempt failed` : ago(when);
   return (
-    <div className="title-block-cell" title={`Last successful sync: ${exact}`}>
+    <div className="title-block-cell sync-cell" title={`Last successful sync: ${exact}`}>
       <p className="title-block-label">{failed || !when ? "Sync status" : "Last synced"}</p>
       <p className="title-block-value">{text}</p>
     </div>

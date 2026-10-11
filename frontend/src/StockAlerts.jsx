@@ -28,7 +28,7 @@ function AlertTable({ title, rows, empty, showDays }) {
         <p className="empty-state" role="status">{empty}</p>
       ) : (
         <div className="shipment-kpi-table-wrap" style={{ overflowX: "auto" }}>
-          <table className="shipment-kpi-table" aria-label={title}>
+          <table className="shipment-kpi-table alerts-table" aria-label={title}>
             <thead>
               <tr>
                 <th scope="col">ID</th>
@@ -109,7 +109,7 @@ export default function StockAlerts() {
           <label>
             Low stock at or below{" "}
             <select value={lowStock} onChange={(e) => setLowStock(Number(e.target.value))}>
-              {[0, 1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} units</option>)}
+              {[0, 1, 2, 3, 5, 10].map((n) => <option key={n} value={n}>{n} {n === 1 ? "unit" : "units"}</option>)}
             </select>
           </label>
         </div>
