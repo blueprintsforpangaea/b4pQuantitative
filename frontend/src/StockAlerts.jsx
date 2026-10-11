@@ -68,6 +68,7 @@ export default function StockAlerts() {
   const [lowStock, setLowStock] = useState(1);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [downloadError, setDownloadError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -101,9 +102,10 @@ export default function StockAlerts() {
               {[30, 60, 90, 180, 365].map((n) => <option key={n} value={n}>{n} days</option>)}
             </select>
           </label>
-          <button type="button" className="secondary-button" onClick={() => downloadCsv(`/stock-alerts.csv?soon_days=${soonDays}`).catch((e) => setError(e.message))}>
+          <button type="button" className="secondary-button" onClick={() => { setDownloadError(""); downloadCsv(`/stock-alerts.csv?soon_days=${soonDays}`).catch((e) => setDownloadError(e.message)); }}>
             Download expiring CSV
           </button>
+          {downloadError ? <span role="alert" className="empty-state">{downloadError}</span> : null}
           <label>
             Low stock at or below{" "}
             <select value={lowStock} onChange={(e) => setLowStock(Number(e.target.value))}>

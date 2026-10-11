@@ -74,3 +74,24 @@ Quantities must be between 0 and 999,999.
 - `GET /requests` lists requests grouped per request id and `POST /requests/{id}/status` changes one through `set_request_status()` (409 for a disallowed transition, 404 unknown id). Both need `X-Admin-Token` (`ADMIN_TOKEN`) because they include requester emails, and need `DATABASE_URL`. The Requests tab asks for the token and keeps it in sessionStorage only.
 - Where a price is 0 the UI shows "Price unknown" instead of $0.
 - `dash_items` is cached in memory for 60 seconds (`ITEMS_CACHE_SECONDS`, 0 disables) and dropped after a quantity edit through this API. Locally `/items` went from about 60 ms to about 4 ms on a cache hit and `/kpis` from about 67 ms to about 7 ms; the gain is larger against a remote database. On serverless each instance has its own cache, so data can be up to a minute old.
+
+## Guide for HQ staff
+
+The dashboard has six tabs.
+
+- **Total Inventory:** every supply as a line item, with search and filters. Where a price has not been entered yet it says "Price unknown" rather than $0.
+- **Inventory KPIs:** totals (units on hand, expired units, units expiring within 90 days), pallet and box counts, and charts by expiration window, time in the warehouse and category. Items with no pallet or box assigned are not counted as a pallet or box.
+- **Stock Alerts:** three lists. Expired and expiring-soon only include items with stock on hand. Low stock lists items at or below the chosen number of units (1 by default). The "Expiring within" and "Low stock" menus change the windows.
+- **Requests:** requests from partner organizations. Choose a new status from the menu on a row; only valid moves are offered (Under Review, Approved, Shipped, Delivered, or Denied/Cancelled while still open). Delivered, Cancelled and Denied are final.
+- **Shipments** and **Shipment KPIs:** the existing shipment planning and reporting screens.
+
+The header shows when the inventory was last copied from the Google Sheet. If the latest attempt failed it shows the last successful sync and says the latest attempt failed.
+
+### CSV exports
+
+- **Stock Alerts > Download expiring CSV:** expired items plus items expiring within the selected window, with location (pallet, box category, box number).
+- **Requests > CSV (per request):** a packing list. Each requested item is matched by exact name to items in stock, earliest expiration first, with pallet and box numbers. Items that are not found in stock are marked as such, so check those by hand. Requested names are typed by partners, so a near-miss spelling will not match.
+
+### Admin token setup (Requests tab and its CSVs)
+
+The Requests tab shows requester emails and can change request status, so it is locked. The server operator sets an environment variable named `ADMIN_TOKEN` on the backend (locally in the shell, on Vercel under Project Settings > Environment Variables) and shares the token with HQ staff privately. Staff type it once into the Requests tab; it is kept only for that browser session. Without `ADMIN_TOKEN` the Requests tab reports that it is disabled. The Requests tab also needs `DATABASE_URL` (the database connection) to be set. Never put the token's value in the repository.
