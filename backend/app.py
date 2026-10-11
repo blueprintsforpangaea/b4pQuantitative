@@ -8,6 +8,7 @@ import csv
 import re
 import os
 import hmac
+import time
 import json
 import logging
 from io import StringIO
@@ -383,8 +384,28 @@ def fetch_items_from_sheet() -> List[Item]:
     return items
 
 
+_items_cache: Dict[str, Any] = {"at": 0.0, "dsn": None, "items": None}
+
+
+def clear_items_cache() -> None:
+    _items_cache.update(at=0.0, dsn=None, items=None)
+
+
 def fetch_items_from_db() -> List[Item]:
-    return [Item(**{k: v for k, v in row.items() if k != "sheet_row"}) for row in db.fetch_items()]
+    """dash_items as Items, cached for ITEMS_CACHE_SECONDS (default 60; 0 disables).
+
+    The cache is per process and dropped after a quantity edit made through this API, so other
+    server instances (or the sheet sync) can show data up to that many seconds old.
+    """
+    ttl = float(os.getenv("ITEMS_CACHE_SECONDS", "60"))
+    now = time.monotonic()
+    dsn = os.getenv("DATABASE_URL")
+    if ttl > 0 and _items_cache["items"] is not None and _items_cache["dsn"] == dsn and now - _items_cache["at"] < ttl:
+        return _items_cache["items"]
+    items = [Item(**{k: v for k, v in row.items() if k != "sheet_row"}) for row in db.fetch_items()]
+    if ttl > 0:
+        _items_cache.update(at=now, dsn=dsn, items=items)
+    return items
 
 
 def load_items(response: Response) -> List[Item]:
@@ -553,6 +574,7 @@ def write_back_to_inventory_tab(row: Dict[str, Any], quantity: int) -> None:
 def update_quantity_in_db(item_id: str, quantity: int) -> QuantityUpdateResponse:
     try:
         row = db.set_quantity(item_id, quantity)
+        clear_items_cache()
     except db.OperationalError as exc:
         logger.error("Postgres unavailable on quantity update: %s", exc)
         raise HTTPException(status_code=503, detail="Database unavailable.") from exc

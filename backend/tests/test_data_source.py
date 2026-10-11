@@ -32,6 +32,8 @@ def no_sheet_writes(monkeypatch):
     monkeypatch.delenv("GOOGLE_SHEETS_CREDENTIALS_JSON", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("ADMIN_TOKEN", "test-token")
+    monkeypatch.setenv("ITEMS_CACHE_SECONDS", "0")
+    appmod.clear_items_cache()
 
 
 client = TestClient(appmod.app, headers={"X-Admin-Token": "test-token"})
@@ -407,3 +409,34 @@ def test_request_status_503_when_db_down(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/none")
     assert client.get("/requests").status_code == 503
     assert client.post("/requests/X/status", json={"status": "Approved"}).status_code == 503
+
+
+# ---- cache ----
+@needs_db
+def test_items_cache_hits_and_invalidates_on_edit(copy_db, monkeypatch):
+    monkeypatch.setenv("ITEMS_CACHE_SECONDS", "60")
+    appmod.clear_items_cache()
+    calls = []
+    real = appmod.db.fetch_items
+    monkeypatch.setattr(appmod.db, "fetch_items", lambda: calls.append(1) or real())
+    first = client.get("/items").json()
+    client.get("/kpis"), client.get("/stock-alerts")
+    assert len(calls) == 1  # one query served all three
+    item = first[0]
+    new_qty = item["quantity"] + 7
+    assert client.post(f"/items/{item['id']}/quantity", json={"quantity": new_qty}).status_code == 200
+    after = {r["id"]: r for r in client.get("/items").json()}
+    assert len(calls) == 2 and after[item["id"]]["quantity"] == new_qty
+
+
+@needs_db
+def test_items_cache_expires(copy_db, monkeypatch):
+    monkeypatch.setenv("ITEMS_CACHE_SECONDS", "60")
+    appmod.clear_items_cache()
+    calls = []
+    real = appmod.db.fetch_items
+    monkeypatch.setattr(appmod.db, "fetch_items", lambda: calls.append(1) or real())
+    client.get("/items")
+    appmod._items_cache["at"] -= 61
+    client.get("/items")
+    assert len(calls) == 2
