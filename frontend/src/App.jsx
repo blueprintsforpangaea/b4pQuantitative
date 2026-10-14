@@ -873,6 +873,7 @@ export default function App() {
           shipmentItemsKpiYear={shipmentItemsKpiYear}
           shipmentTimingMetrics={shipmentTimingMetrics}
           shipmentValueByYearPoints={shipmentValueByYearPoints}
+          shipmentValueEntries={shipmentValueEntries}
           shipmentValueKpiYear={shipmentValueKpiYear}
           shipments={shipments}
         />
