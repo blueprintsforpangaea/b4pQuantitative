@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { blueprintsRosterNames } from "../lib/shipments.js";
-import { ACTIVE_STAGES, SHIPPING_METHODS, allocatedByItem, expiryTier, linesWithItemAdded, parseRequestIds } from "../lib/shipmentsLogic.js";
+import { ACTIVE_STAGES, SHIPPING_METHODS, splitShippingMethod, allocatedByItem, expiryTier, linesWithItemAdded, parseRequestIds } from "../lib/shipmentsLogic.js";
 import { ExpiryTag } from "./ShipmentLines.jsx";
 
 function Modal({ title, onClose, children, wide }) {
@@ -18,11 +18,36 @@ function Modal({ title, onClose, children, wide }) {
 }
 
 export function ContactAndMethodDatalists() {
+  return <datalist id="ship-roster">{blueprintsRosterNames.map((name) => <option key={name} value={name} />)}</datalist>;
+}
+
+// Car / Boat / Plane / Other, with free text when Other. `onChange` gets the stored method string.
+export function ShippingMethodField({ value, disabled, onChange, labelClass = "modal-field" }) {
+  const { choice, other } = splitShippingMethod(value);
+  const [otherText, setOtherText] = useState(other);
+  const [picked, setPicked] = useState(choice);
+  useEffect(() => {
+    setPicked(choice);
+    setOtherText(other);
+  }, [choice, other]);
+
+  const choose = (next) => {
+    setPicked(next);
+    if (next !== "Other") onChange(next);
+  };
+
   return (
-    <>
-      <datalist id="ship-roster">{blueprintsRosterNames.map((name) => <option key={name} value={name} />)}</datalist>
-      <datalist id="ship-methods">{SHIPPING_METHODS.map((name) => <option key={name} value={name} />)}</datalist>
-    </>
+    <label className={labelClass}>
+      <span>Shipping method</span>
+      <select value={picked} disabled={disabled} onChange={(event) => choose(event.target.value)}>
+        <option value="">Not set</option>
+        {SHIPPING_METHODS.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select>
+      {picked === "Other" ? (
+        <input value={otherText} disabled={disabled} placeholder="Describe the method" aria-label="Other shipping method"
+          onChange={(event) => setOtherText(event.target.value)} onBlur={() => otherText !== other && onChange(otherText.trim() || "Other")} />
+      ) : null}
+    </label>
   );
 }
 
@@ -55,7 +80,7 @@ export function NewShipmentModal({ onClose, onCreate }) {
           <select value={form.shipment_type} onChange={set("shipment_type")}><option>Local</option><option>International</option></select>
         </label>
         <label className="modal-field"><span>Blueprints contact</span><input list="ship-roster" value={form.blueprints_contact} onChange={set("blueprints_contact")} /></label>
-        <label className="modal-field"><span>Shipping method</span><input list="ship-methods" value={form.shipping_method} onChange={set("shipping_method")} /></label>
+        <ShippingMethodField value={form.shipping_method} onChange={(method) => setForm((current) => ({ ...current, shipping_method: method }))} />
         <label className="modal-field"><span>Request ID(s), comma separated</span><input value={form.request_ids} onChange={set("request_ids")} placeholder="REQ-..." /></label>
         {error ? <p className="ship-error" role="alert">{error}</p> : null}
         <div className="ship-form-actions">

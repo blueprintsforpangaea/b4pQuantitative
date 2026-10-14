@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { STAGE_LABELS, isActive, linesWithQuantity, linesWithout, nextStage, parseRequestIds, previousActiveStage, shipmentTotals, formatMoney } from "../lib/shipmentsLogic.js";
+import { ShippingMethodField } from "./ShipmentForms.jsx";
 import ShipmentLines from "./ShipmentLines.jsx";
 import ShipmentTracker from "./ShipmentTracker.jsx";
 
@@ -64,7 +65,7 @@ export default function ShipmentCard({ shipment, expanded, onToggle, canEdit, ac
         <div className="ship-card-body">
           <div className="ship-fields">
             <TextField label="Blueprints contact" value={shipment.blueprints_contact} canEdit={canEdit} list="ship-roster" onSave={(v) => patch({ blueprints_contact: v })} />
-            <TextField label="Shipping method" value={shipment.shipping_method} canEdit={canEdit} list="ship-methods" onSave={(v) => patch({ shipping_method: v })} />
+            <ShippingMethodField labelClass="ship-field" value={shipment.shipping_method} disabled={!canEdit} onChange={(v) => patch({ shipping_method: v })} />
             <TextField label="Recipient" value={shipment.recipient} canEdit={canEdit} onSave={(v) => patch({ recipient: v })} />
             <TextField label="Ship date" type="date" value={shipment.ship_date} canEdit={canEdit} onSave={(v) => patch({ ship_date: v || null })} />
             <TextField label="Request ID(s), comma separated" value={(shipment.request_ids || []).join(", ")} canEdit={canEdit} onSave={(v) => patch({ request_ids: parseRequestIds(v) })} />

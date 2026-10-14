@@ -92,4 +92,49 @@ describe("Shipments tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Past/ }));
     expect(await screen.findByRole("button", { name: /Test Clinic/ })).toBeTruthy();
   });
+
+  it("binds every header field to its own data and saves each to the right key", async () => {
+    const api = await seededApi();
+    const patch = vi.spyOn(api, "patch");
+    render(<Harness api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test Clinic/ }));
+
+    expect(screen.getByLabelText("Blueprints contact").value).toBe("Alex Example");
+    expect(screen.getByLabelText("Shipping method").value).toBe("Boat");
+    expect(screen.getByLabelText("Recipient").value).toBe("Test Clinic");
+    expect(screen.getByLabelText("Request ID(s), comma separated").value).toBe("REQ-TEST-1");
+    expect(screen.getByLabelText("Ship date").value).toBe("");
+    expect(screen.getByLabelText("Notes").value).toBe("");
+
+    const edit = async (label, value, expected) => {
+      const input = screen.getByLabelText(label);
+      fireEvent.change(input, { target: { value } });
+      fireEvent.blur(input);
+      await waitFor(() => expect(patch).toHaveBeenLastCalledWith(expect.any(String), expected));
+    };
+    await edit("Blueprints contact", "Sam Example", { blueprints_contact: "Sam Example" });
+    await edit("Recipient", "Test Clinic B", { recipient: "Test Clinic B" });
+    await edit("Request ID(s), comma separated", "REQ-A, REQ-B", { request_ids: ["REQ-A", "REQ-B"] });
+    await edit("Ship date", "2026-11-01", { ship_date: "2026-11-01" });
+    await edit("Notes", "Fragile", { notes: "Fragile" });
+    fireEvent.change(screen.getByLabelText("Shipping method"), { target: { value: "Plane" } });
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith(expect.any(String), { shipping_method: "Plane" }));
+    expect((await api.list("all"))[0]).toMatchObject({ blueprints_contact: "Sam Example", recipient: "Test Clinic B", request_ids: ["REQ-A", "REQ-B"], shipping_method: "Plane", notes: "Fragile" });
+  });
+
+  it("offers Other with free text for an unlisted shipping method", async () => {
+    const api = createMockApi(inventory);
+    await api.create({ name: "Freight run", shipping_method: "Pallet freight", lines: [] });
+    render(<Harness api={api} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Freight run/ }));
+    expect(screen.getByLabelText("Shipping method").value).toBe("Other");
+    expect(screen.getByLabelText("Other shipping method").value).toBe("Pallet freight");
+  });
+
+  it("labels expiry with the shared inventory tiers", async () => {
+    render(<Harness api={await seededApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test Clinic/ }));
+    expect(screen.getByText("Expired")).toBeTruthy();
+    expect(screen.getByText("No expiry date")).toBeTruthy();
+  });
 });

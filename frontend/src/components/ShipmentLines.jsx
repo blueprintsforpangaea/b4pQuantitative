@@ -1,10 +1,15 @@
 import { useState } from "react";
-import { EXPIRY_LABELS, EXPIRY_SHORT, formatLocation, groupLinesByProduct, isActive, validateQuantity } from "../lib/shipmentsLogic.js";
+import { expiryTiers } from "../lib/colors.js";
+import { EXPIRY_LABELS, formatLocation, groupLinesByProduct, isActive, validateQuantity } from "../lib/shipmentsLogic.js";
+
+// API expiry_status -> the shared inventory tier ("later" is the >90 day tier, id "ok").
+const TIER_FOR_STATUS = { expired: "expired", d30: "d30", d90: "d90", later: "ok", none: "none" };
 
 export function ExpiryTag({ status, date }) {
+  const tier = expiryTiers.find((entry) => entry.id === TIER_FOR_STATUS[status]) || expiryTiers[expiryTiers.length - 1];
   return (
-    <span className={`ship-tag ship-tag-${status}`} title={`${EXPIRY_LABELS[status]}${date ? ` (${date})` : ""}`}>
-      {EXPIRY_SHORT[status]}
+    <span className="ship-tag" style={{ background: tier.color, color: tier.text }} title={`${EXPIRY_LABELS[status]}${date ? ` (${date})` : ""}`}>
+      {tier.label}
     </span>
   );
 }

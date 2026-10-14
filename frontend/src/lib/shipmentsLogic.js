@@ -21,7 +21,15 @@ export const EXPIRY_LABELS = {
 
 export const EXPIRY_SHORT = { expired: "Expired", d30: "30d", d90: "90d", later: "90d+", none: "No date" };
 
-export const SHIPPING_METHODS = ["Car", "Boat", "Plane", "Freight", "Courier", "Other"];
+export const SHIPPING_METHODS = ["Car", "Boat", "Plane", "Other"];
+
+// A stored method outside the list is shown as Other with its text kept.
+export function splitShippingMethod(value) {
+  const text = String(value || "");
+  if (!text) return { choice: "", other: "" };
+  if (SHIPPING_METHODS.includes(text) && text !== "Other") return { choice: text, other: "" };
+  return { choice: "Other", other: text === "Other" ? "" : text };
+}
 
 export function isActive(shipment) {
   return ACTIVE_STAGES.includes(shipment.stage);

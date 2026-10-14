@@ -244,10 +244,6 @@
   white-space: nowrap;
 }
 
-.ship-tag-expired { background: #b3261e; }
-.ship-tag-d30 { background: #c2570c; }
-.ship-tag-d90 { background: #f2c200; color: #1f1f1f; }
-.ship-tag-later { background: #1e7a43; }
 .ship-tag-none { background: #5f5f5f; }
 .ship-tag-local { background: #0337a3; }
 .ship-tag-intl { background: #5b2a86; }
@@ -274,6 +270,7 @@
 }
 
 .ship-field input,
+.ship-field select,
 .ship-field textarea {
   padding: 6px 8px;
   border: 1px solid var(--bp-line-strong);
@@ -285,6 +282,7 @@
 }
 
 .ship-field input:disabled,
+.ship-field select:disabled,
 .ship-field textarea:disabled {
   background: var(--bp-surface-sunken);
 }
