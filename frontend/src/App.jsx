@@ -147,14 +147,8 @@ export default function App() {
       });
       return accumulator;
     }, {});
-  const completedShipmentItemIds = new Set(
-    shipments
-      .filter((shipment) => shipment.isCompleted)
-      .flatMap((shipment) => shipment.items.map((item) => String(item.id)))
-  );
-  const inventoryRows = buildInventoryRows(items).filter(
-    (row) => !completedShipmentItemIds.has(String(row.id))
-  );
+  // Shipped units are already taken out of stock by the database, so inventory is exactly what /items returns.
+  const inventoryRows = buildInventoryRows(items);
   const inventoryRowsWithStatus = inventoryRows.map((row) => ({
     ...row,
     inventoryStatus: inventoryStatusForItem(row.id, shipments),
@@ -303,7 +297,7 @@ export default function App() {
       shipmentKind: "non-inventory",
       shipmentDate: shipment.shippedAt || shipment.createdAt,
       shipmentValue: Number(shipment.valuation) || 0,
-      shipmentItems: 0,
+      shipmentItems: Number(shipment.unitCount) || 0,
     })),
   ];
   function buildShipmentYearPoints(year) {
