@@ -51,12 +51,6 @@ export default function App() {
   );
   const [isShipmentModalOpen, setIsShipmentModalOpen] = useState(false);
   const [pendingShipmentItems, setPendingShipmentItems] = useState([]);
-  const [selectedShipmentId, setSelectedShipmentId] = useState("__new__");
-  const [newShipmentRecipientName, setNewShipmentRecipientName] = useState("");
-  const [newShipmentType, setNewShipmentType] = useState("Local");
-  const [newShipmentPointOfContact, setNewShipmentPointOfContact] = useState("");
-  const [newShipmentRecipientPointOfContact, setNewShipmentRecipientPointOfContact] = useState("");
-  const [newShipmentSupplyIds, setNewShipmentSupplyIds] = useState("");
   const [selectedInventoryIds, setSelectedInventoryIds] = useState([]);
   const [valuationRange, setValuationRange] = useState({ min: 0, max: 0 });
   const [isShipmentValueDataOpen, setIsShipmentValueDataOpen] = useState(false);
@@ -435,7 +429,6 @@ export default function App() {
 <TotalInventory
           allocationsByItem={allocationsByItem}
           clearInventoryFilters={clearInventoryFilters}
-          currentShipments={currentShipments}
           inventoryRowsWithShipmentStatus={inventoryRowsWithShipmentStatus}
           inventoryRowsWithStatus={inventoryRowsWithStatus}
           inventoryShipmentButtonRef={inventoryShipmentButtonRef}
@@ -455,11 +448,6 @@ export default function App() {
           selectedWorkflowStatuses={selectedWorkflowStatuses}
           setIsInventoryFiltersOpen={setIsInventoryFiltersOpen}
           setIsShipmentModalOpen={setIsShipmentModalOpen}
-          setNewShipmentPointOfContact={setNewShipmentPointOfContact}
-          setNewShipmentRecipientName={setNewShipmentRecipientName}
-          setNewShipmentRecipientPointOfContact={setNewShipmentRecipientPointOfContact}
-          setNewShipmentSupplyIds={setNewShipmentSupplyIds}
-          setNewShipmentType={setNewShipmentType}
           setPendingShipmentItems={setPendingShipmentItems}
           setSearchTerm={setSearchTerm}
           setSelectedBoxTypes={setSelectedBoxTypes}
@@ -469,7 +457,6 @@ export default function App() {
           setSelectedExpiryTiers={setSelectedExpiryTiers}
           setSelectedInventoryIds={setSelectedInventoryIds}
           setSelectedPallets={setSelectedPallets}
-          setSelectedShipmentId={setSelectedShipmentId}
           setSelectedWorkflowStatuses={setSelectedWorkflowStatuses}
           setValuationRange={setValuationRange}
           showFloatingInventoryAction={showFloatingInventoryAction}
@@ -546,7 +533,9 @@ export default function App() {
         <AddItemsModal
           items={items}
           shipments={shipmentsState.shipments}
-          preselected={pendingShipmentItems}
+          preselected={pendingShipmentItems
+            .map((row) => items.find((item) => String(item.id) === String(row.id)))
+            .filter(Boolean)}
           onClose={() => {
             setIsShipmentModalOpen(false);
             setPendingShipmentItems([]);

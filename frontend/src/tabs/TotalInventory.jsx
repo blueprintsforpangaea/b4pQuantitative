@@ -36,7 +36,6 @@ function PulledTag({ units }) {
 export default function TotalInventory({
   allocationsByItem,
   clearInventoryFilters,
-  currentShipments,
   inventoryRowsWithShipmentStatus,
   inventoryRowsWithStatus,
   inventoryShipmentButtonRef,
@@ -56,11 +55,6 @@ export default function TotalInventory({
   selectedWorkflowStatuses,
   setIsInventoryFiltersOpen,
   setIsShipmentModalOpen,
-  setNewShipmentPointOfContact,
-  setNewShipmentRecipientName,
-  setNewShipmentRecipientPointOfContact,
-  setNewShipmentSupplyIds,
-  setNewShipmentType,
   setPendingShipmentItems,
   setSearchTerm,
   setSelectedBoxTypes,
@@ -70,7 +64,6 @@ export default function TotalInventory({
   setSelectedExpiryTiers,
   setSelectedInventoryIds,
   setSelectedPallets,
-  setSelectedShipmentId,
   setSelectedWorkflowStatuses,
   setValuationRange,
   showFloatingInventoryAction,
@@ -148,12 +141,6 @@ export default function TotalInventory({
     }
 
     setPendingShipmentItems(selectedItems);
-    setSelectedShipmentId(currentShipments[0]?.id || "__new__");
-    setNewShipmentRecipientName("");
-    setNewShipmentType("Local");
-    setNewShipmentPointOfContact("");
-    setNewShipmentRecipientPointOfContact("");
-    setNewShipmentSupplyIds("");
     setIsShipmentModalOpen(true);
   }
 

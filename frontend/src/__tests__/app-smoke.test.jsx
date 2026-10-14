@@ -156,3 +156,14 @@ describe("Partial pulls without a shipment name", () => {
     expect(screen.getByText(/4 units/).textContent).not.toContain("→");
   });
 });
+
+describe("Add selected to shipment", () => {
+  it("opens the add-items dialog with the selected supply", async () => {
+    render(<App />);
+    await waitFor(() => expect(screen.queryByText(/Loading dashboard data/)).toBeNull());
+    fireEvent.click(screen.getByLabelText("Select supply s1"));
+    fireEvent.click(screen.getByRole("button", { name: /Add Selected To Shipment/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Synthetic supply s1/)).toBeTruthy();
+  });
+});
