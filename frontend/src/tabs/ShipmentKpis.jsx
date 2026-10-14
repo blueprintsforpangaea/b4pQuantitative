@@ -1,3 +1,4 @@
+import ShipmentComparison from "../components/ShipmentComparison.jsx";
 import { MetricCard } from "../components/PieCharts.jsx";
 import { ShipmentBarChart, ShipmentItemsLineChart, ShipmentValueLineChart } from "../components/ShipmentCharts.jsx";
 import { formatAverageDays, formatCurrency, formatNumber } from "../lib/format.js";
@@ -21,6 +22,7 @@ export default function ShipmentKpis({
   shipmentItemsKpiYear,
   shipmentTimingMetrics,
   shipmentValueByYearPoints,
+  shipmentValueEntries = [],
   shipmentValueKpiYear,
   shipments,
 }) {
@@ -115,6 +117,7 @@ export default function ShipmentKpis({
 
       {activeShipmentKpiSubtab === "overview" ? (
         <>
+      <ShipmentComparison entries={shipmentValueEntries} />
       <div className="shipment-kpi-overview-split">
         <div className="shipment-kpi-summary-pane">
           <div className="shipment-kpi-pane-header">

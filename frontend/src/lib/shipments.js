@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_BASE } from "./config.js";
+import { readAdminToken } from "./shipmentsApi.js";
 import { todayIsoDate } from "./dates.js";
 import { sortItemsByExpiration, sortItemsByLocation } from "./inventory.js";
 
@@ -198,7 +199,9 @@ export function getShipmentItemsForDisplay(shipment) {
 
 export async function fetchAllocations() {
   try {
-    const response = await fetch(`${API_BASE}/allocations`);
+    // With the admin token the rows also carry shipment_id and shipment_name; without it only item_id, stage, quantity.
+    const token = readAdminToken();
+    const response = await fetch(`${API_BASE}/allocations`, token ? { headers: { "X-Admin-Token": token } } : undefined);
     if (response.status === 404 || response.status === 503) {
       return [];
     }
