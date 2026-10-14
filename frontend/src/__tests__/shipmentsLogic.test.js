@@ -99,3 +99,40 @@ describe("legacy import and adapter", () => {
     expect(nonInventoryShipments[0]).toMatchObject({ valuation: 300, shippedAt: "2026-09-01" });
   });
 });
+
+import { allocatedByItem, expiryTier, linesWithItemAdded, linesWithQuantity, linesWithout } from "../lib/shipmentsLogic.js";
+
+describe("line edit helpers", () => {
+  const lines = [
+    { id: "1", item_id: "a", name: "G", quantity: 5 },
+    { id: "2", item_id: null, name: "Donated crutches", quantity: 2, unit_price: 10 },
+  ];
+  it("adds a new item or raises the quantity of an existing one", () => {
+    expect(linesWithItemAdded(lines, "b", 3)).toEqual([
+      { item_id: "a", quantity: 5 },
+      { description: "Donated crutches", quantity: 2, unit_price: 10, lot_number: undefined, expiration_date: undefined },
+      { item_id: "b", quantity: 3 },
+    ]);
+    expect(linesWithItemAdded(lines, "a", 2)[0]).toEqual({ item_id: "a", quantity: 7 });
+  });
+  it("changes one quantity and removes one line", () => {
+    expect(linesWithQuantity(lines, "1", 9)[0].quantity).toBe(9);
+    expect(linesWithout(lines, "1")).toHaveLength(1);
+    expect(linesWithout(lines, "1")[0].description).toBe("Donated crutches");
+  });
+  it("sums active allocations only", () => {
+    const map = allocatedByItem([
+      { stage: "pulling", lines: [{ item_id: "a", quantity: 4 }] },
+      { stage: "planned", lines: [{ item_id: "a", quantity: 1 }, { item_id: null, quantity: 9 }] },
+      { stage: "shipped", lines: [{ item_id: "a", quantity: 100 }] },
+    ]);
+    expect(map.get("a")).toBe(5);
+  });
+  it("tiers expiry", () => {
+    expect(expiryTier("2026-01-01", "2026-06-01")).toBe("expired");
+    expect(expiryTier("2026-06-20", "2026-06-01")).toBe("d30");
+    expect(expiryTier("2026-08-01", "2026-06-01")).toBe("d90");
+    expect(expiryTier("2027-06-01", "2026-06-01")).toBe("later");
+    expect(expiryTier(null)).toBe("none");
+  });
+});

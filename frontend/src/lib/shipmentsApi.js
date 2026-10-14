@@ -76,8 +76,16 @@ function expiryStatus(expiration, asOf) {
 // In-memory implementation of the same contract, for development and tests before the API lands.
 // `inventory` is a list of {id, name, category, quantity, unit_value, expiration_date, lot_number,
 // pallet_number, category_box, box_number}; it is copied so shipping can take stock.
-export function createMockApi(inventory = [], seed = []) {
-  const stock = new Map(inventory.map((item) => [String(item.id), { ...item }]));
+export function createMockApi(inventorySource = [], seed = []) {
+  const stock = new Map();
+  // Items may load after the API is created; copy new ones in on every call.
+  const syncStock = () => {
+    const inventory = typeof inventorySource === "function" ? inventorySource() : inventorySource;
+    for (const item of inventory) {
+      if (!stock.has(String(item.id))) stock.set(String(item.id), { ...item });
+    }
+  };
+  syncStock();
   const shipments = new Map(seed.map((shipment) => [shipment.id, structuredClone(shipment)]));
   let counter = 100;
 
@@ -176,7 +184,7 @@ export function createMockApi(inventory = [], seed = []) {
 
   const HEADER_KEYS = ["name", "recipient", "shipment_type", "shipping_method", "blueprints_contact", "notes", "ship_date", "delivered_date", "request_ids", "kind", "unit_count", "value"];
 
-  return {
+  const api = {
     list: async (scope = "all") =>
       [...shipments.values()]
         .filter((s) => scope === "all" || (scope === "active") === ACTIVE_STAGES.includes(s.stage))
@@ -232,6 +240,9 @@ export function createMockApi(inventory = [], seed = []) {
       return result;
     },
   };
+  const synced = Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, (...args) => { syncStock(); return fn(...args); }]));
+
+  return synced;
 
   async function realOrMockCreate(old, isNon) {
     if (isNon) {
@@ -244,11 +255,14 @@ export function createMockApi(inventory = [], seed = []) {
 }
 
 let mockSingleton = null;
+let currentInventoryGetter = () => [];
 
 // Real API unless VITE_SHIPMENTS_MOCK=1 (dev only; data is synthetic and lives in memory).
-export function getShipmentsApi(inventory) {
+export function getShipmentsApi(getInventory) {
   if (import.meta.env.VITE_SHIPMENTS_MOCK === "1") {
-    mockSingleton = mockSingleton || createMockApi(inventory, []);
+    // Always read through the latest getter (React may discard the first render's closure).
+    currentInventoryGetter = getInventory;
+    mockSingleton = mockSingleton || createMockApi(() => currentInventoryGetter(), []);
     return mockSingleton;
   }
   return realApi;

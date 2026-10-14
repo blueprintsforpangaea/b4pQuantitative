@@ -6,7 +6,7 @@ import { autoStageAfterTick, isActive } from "./shipmentsLogic.js";
 export function useShipments({ items = [], api: injectedApi } = {}) {
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const api = useMemo(() => injectedApi || getShipmentsApi(itemsRef.current.map(toMockItem)), [injectedApi]);
+  const api = useMemo(() => injectedApi || getShipmentsApi(() => itemsRef.current.map(toMockItem)), [injectedApi]);
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

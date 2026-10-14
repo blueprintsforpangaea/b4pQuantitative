@@ -234,3 +234,59 @@ export function toLegacyShipments(apiShipments) {
     }));
   return { shipments: legacy, nonInventoryShipments: nonInventory };
 }
+
+export function formatMoney(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value) || 0);
+}
+
+// Client-side expiry tier for inventory rows (same tiers as the API's expiry_status).
+export function expiryTier(expirationDate, asOf = new Date().toISOString().slice(0, 10)) {
+  if (!expirationDate) return "none";
+  const days = Math.round((Date.parse(expirationDate) - Date.parse(asOf)) / 86400000);
+  if (days < 0) return "expired";
+  if (days <= 30) return "d30";
+  if (days <= 90) return "d90";
+  return "later";
+}
+
+// Units of each inventory item promised to active shipments: Map<item_id, units>.
+export function allocatedByItem(shipments) {
+  const map = new Map();
+  for (const shipment of shipments) {
+    if (!isActive(shipment)) continue;
+    for (const line of shipment.lines || []) {
+      if (line.item_id === null || line.item_id === undefined) continue;
+      map.set(String(line.item_id), (map.get(String(line.item_id)) || 0) + line.quantity);
+    }
+  }
+  return map;
+}
+
+// Full replacement list for PUT /shipments/{id}/lines with one item added (or its quantity raised).
+export function linesWithItemAdded(lines, itemId, quantity) {
+  const kept = lines.map((line) =>
+    line.item_id === null || line.item_id === undefined
+      ? { description: line.name, quantity: line.quantity, unit_price: line.unit_price, lot_number: line.lot_number, expiration_date: line.expiration_date }
+      : { item_id: String(line.item_id), quantity: line.quantity }
+  );
+  const existing = kept.find((line) => String(line.item_id) === String(itemId));
+  if (existing) {
+    existing.quantity += quantity;
+  } else {
+    kept.push({ item_id: String(itemId), quantity });
+  }
+  return kept;
+}
+
+export function linesWithQuantity(lines, lineId, quantity) {
+  return lines.map((line) => {
+    const base = line.item_id === null || line.item_id === undefined
+      ? { description: line.name, quantity: line.quantity, unit_price: line.unit_price, lot_number: line.lot_number, expiration_date: line.expiration_date }
+      : { item_id: String(line.item_id), quantity: line.quantity };
+    return line.id === lineId ? { ...base, quantity } : base;
+  });
+}
+
+export function linesWithout(lines, lineId) {
+  return linesWithQuantity(lines, null, 0).filter((_, index) => lines[index].id !== lineId);
+}

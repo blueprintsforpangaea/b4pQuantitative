@@ -1,20 +1,23 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import StockAlerts from "./StockAlerts.jsx";
 import Requests from "./Requests.jsx";
 import SyncCell from "./SyncCell.jsx";
-import { API_BASE, NON_INVENTORY_SHIPMENT_STORAGE_KEY, PALLET_MAP_STORAGE_KEY, SHIPMENT_STORAGE_KEY, tabs } from "./lib/config.js";
+import { API_BASE, PALLET_MAP_STORAGE_KEY, tabs } from "./lib/config.js";
 import { averageShipmentDays, parseLocalDate, todayIsoDate } from "./lib/dates.js";
 import { formatNumber } from "./lib/format.js";
 import { buildInventoryRows, inventoryStatusForItem } from "./lib/inventory.js";
 import { canPlacePallet, clampPalletPosition, mergePalletLayout } from "./lib/palletMap.js";
-import { defaultShipments, normalizePastShipmentStatus, normalizeRequestedQuantity, normalizeShipmentItem, normalizeShipmentType, requestedShipmentItemValue, withConsolidationCompletionDate } from "./lib/shipments.js";
+import { normalizeRequestedQuantity, normalizeShipmentType, requestedShipmentItemValue } from "./lib/shipments.js";
+import { useShipments } from "./lib/useShipments.js";
+import { toLegacyShipments } from "./lib/shipmentsLogic.js";
+import { AddItemsModal } from "./components/ShipmentForms.jsx";
 import { applyDashboardTooltips } from "./lib/tooltips.js";
 import TotalInventory from "./tabs/TotalInventory.jsx";
 import InventoryKpis from "./tabs/InventoryKpis.jsx";
 import Shipments from "./tabs/Shipments.jsx";
 import ShipmentKpis from "./tabs/ShipmentKpis.jsx";
-import ShipmentModals, { ShipmentActionModals } from "./components/ShipmentModals.jsx";
+import ShipmentModals from "./components/ShipmentModals.jsx";
 import { InventoryKpiModals, InventoryDetailsModal } from "./components/InventoryModals.jsx";
 import ShipmentKpiModals from "./components/ShipmentKpiModals.jsx";
 
@@ -38,8 +41,12 @@ export default function App() {
   const [showNonAvailableItems, setShowNonAvailableItems] = useState(false);
   const [isInventoryFiltersOpen, setIsInventoryFiltersOpen] = useState(false);
   const [showFloatingInventoryAction, setShowFloatingInventoryAction] = useState(false);
-  const [shipments, setShipments] = useState(defaultShipments);
-  const [nonInventoryShipments, setNonInventoryShipments] = useState([]);
+  const [shipmentFocus, setShipmentFocus] = useState(null);
+  const shipmentsState = useShipments({ items });
+  const { shipments, nonInventoryShipments } = useMemo(
+    () => toLegacyShipments(shipmentsState.shipments),
+    [shipmentsState.shipments]
+  );
   const [isShipmentModalOpen, setIsShipmentModalOpen] = useState(false);
   const [pendingShipmentItems, setPendingShipmentItems] = useState([]);
   const [selectedShipmentId, setSelectedShipmentId] = useState("__new__");
@@ -50,49 +57,13 @@ export default function App() {
   const [newShipmentSupplyIds, setNewShipmentSupplyIds] = useState("");
   const [selectedInventoryIds, setSelectedInventoryIds] = useState([]);
   const [valuationRange, setValuationRange] = useState({ min: 0, max: 0 });
-  const [currentShipmentSearchTerm, setCurrentShipmentSearchTerm] = useState("");
-  const [pastShipmentSearchTerm, setPastShipmentSearchTerm] = useState("");
-  const [currentShipmentTypeFilter, setCurrentShipmentTypeFilter] = useState("All");
-  const [currentShipmentStatusFilter, setCurrentShipmentStatusFilter] = useState("All");
-  const [pastShipmentTypeFilter, setPastShipmentTypeFilter] = useState("All");
-  const [pastShipmentStatusDateFilter, setPastShipmentStatusDateFilter] = useState("creation");
-  const [nonInventoryShipmentSearch, setNonInventoryShipmentSearch] = useState("");
-  const [nonInventoryShipmentLocation, setNonInventoryShipmentLocation] = useState("All");
-  const [nonInventoryValuationSort, setNonInventoryValuationSort] = useState("high-low");
-  const [isCreateShipmentModalOpen, setIsCreateShipmentModalOpen] = useState(false);
-  const [isNonInventoryShipmentModalOpen, setIsNonInventoryShipmentModalOpen] = useState(false);
   const [isShipmentValueDataOpen, setIsShipmentValueDataOpen] = useState(false);
   const [isShipmentItemsDataOpen, setIsShipmentItemsDataOpen] = useState(false);
   const [shipmentValueKpiYear, setShipmentValueKpiYear] = useState(() => new Date().getFullYear());
   const [shipmentItemsKpiYear, setShipmentItemsKpiYear] = useState(() => new Date().getFullYear());
-  const [nonInventoryClinicName, setNonInventoryClinicName] = useState("");
-  const [nonInventoryPointOfContact, setNonInventoryPointOfContact] = useState("");
-  const [nonInventoryShipmentType, setNonInventoryShipmentType] = useState("Local");
-  const [nonInventoryShipmentDate, setNonInventoryShipmentDate] = useState(todayIsoDate());
-  const [nonInventoryValuation, setNonInventoryValuation] = useState("");
   const [detailsItem, setDetailsItem] = useState(null);
-  const [returningShipmentItem, setReturningShipmentItem] = useState(null);
-  const [returningShipmentItems, setReturningShipmentItems] = useState(null);
-  const [requestingShipmentItem, setRequestingShipmentItem] = useState(null);
-  const [consolidatingShipmentItem, setConsolidatingShipmentItem] = useState(null);
-  const [bulkConsolidationCheck, setBulkConsolidationCheck] = useState(null);
-  const [addingSupplyIdsShipmentId, setAddingSupplyIdsShipmentId] = useState(null);
-  const [shipmentSupplyIdsInput, setShipmentSupplyIdsInput] = useState("");
-  const [requestedUnitsValue, setRequestedUnitsValue] = useState("");
-  const [expandedShipmentIds, setExpandedShipmentIds] = useState([]);
-  const [editingShipmentField, setEditingShipmentField] = useState(null);
-  const [editingShipmentValue, setEditingShipmentValue] = useState("");
-  const [editingShipmentNotesId, setEditingShipmentNotesId] = useState(null);
-  const [editingShipmentNotesValue, setEditingShipmentNotesValue] = useState("");
-  const [shippingShipmentId, setShippingShipmentId] = useState(null);
-  const [deliveringShipmentId, setDeliveringShipmentId] = useState(null);
-  const [revertingDeliveredShipmentId, setRevertingDeliveredShipmentId] = useState(null);
   const [shipmentDate, setShipmentDate] = useState("");
-  const [transportType, setTransportType] = useState("Car");
-  const [transportTypeOther, setTransportTypeOther] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
-  const [deliveryDateMode, setDeliveryDateMode] = useState("date");
-  const [shipmentNotes, setShipmentNotes] = useState("");
   const [activeExpirationPieLabel, setActiveExpirationPieLabel] = useState(null);
   const [activeDurationPieLabel, setActiveDurationPieLabel] = useState(null);
   const [activeCategoryPieLabel, setActiveCategoryPieLabel] = useState(null);
@@ -107,7 +78,6 @@ export default function App() {
   const [draftPalletLayout, setDraftPalletLayout] = useState({});
   const [draggingPallet, setDraggingPallet] = useState(null);
   const [activePalletId, setActivePalletId] = useState(null);
-  const [focusedPastShipmentId, setFocusedPastShipmentId] = useState(null);
   const palletMapRef = useRef(null);
   const inventoryShipmentButtonRef = useRef(null);
   async function refreshDashboard(showLoader = false) {
@@ -183,76 +153,10 @@ export default function App() {
     observer.observe(button);
     return () => observer.disconnect();
   }, [activeTab, loading, error]);
-  useEffect(() => {
-    try {
-      const storedShipments = window.localStorage.getItem(SHIPMENT_STORAGE_KEY);
-      if (storedShipments) {
-        const parsedShipments = JSON.parse(storedShipments);
-        const normalizedShipments = (parsedShipments.length > 0 ? parsedShipments : defaultShipments)
-          .map((shipment) =>
-            withConsolidationCompletionDate({
-              ...shipment,
-              shipmentType: normalizeShipmentType(shipment.shipmentType),
-              filterMode:
-                !shipment.filterMode || shipment.filterMode === "location"
-                  ? "original"
-                  : shipment.filterMode,
-              isCompleted: Boolean(shipment.isCompleted),
-              createdAt: shipment.createdAt || "",
-              consolidationStartedAt: shipment.consolidationStartedAt || "",
-              consolidationCompletedAt: shipment.consolidationCompletedAt || "",
-              pastShipmentStatus: Boolean(shipment.isCompleted)
-                ? normalizePastShipmentStatus(
-                    shipment.pastShipmentStatus,
-                    shipment.deliveryDate,
-                    shipment.pastShipmentStatusOverride ||
-                      (shipment.pastShipmentStatusManuallySet ? "Shipped" : "")
-                  )
-                : undefined,
-              items: (shipment.items || []).map(normalizeShipmentItem),
-            })
-          );
-        setShipments(normalizedShipments);
-      }
-    } catch (err) {
-      console.error("Unable to restore shipments", err);
-    }
-  }, []);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(SHIPMENT_STORAGE_KEY, JSON.stringify(shipments));
-    } catch (err) {
-      console.error("Unable to persist shipments", err);
-    }
-  }, [shipments]);
-  useEffect(() => {
-    try {
-      const storedShipments = window.localStorage.getItem(NON_INVENTORY_SHIPMENT_STORAGE_KEY);
-      if (storedShipments) {
-        const parsedShipments = JSON.parse(storedShipments);
-        if (Array.isArray(parsedShipments)) {
-          setNonInventoryShipments(
-            parsedShipments.map((shipment) => ({
-              ...shipment,
-              shippedAt: shipment.shippedAt || shipment.createdAt || "",
-            }))
-          );
-        }
-      }
-    } catch (err) {
-      console.error("Unable to restore non-inventory shipments", err);
-    }
-  }, []);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        NON_INVENTORY_SHIPMENT_STORAGE_KEY,
-        JSON.stringify(nonInventoryShipments)
-      );
-    } catch (err) {
-      console.error("Unable to persist non-inventory shipments", err);
-    }
-  }, [nonInventoryShipments]);
+
+
+
+
   useEffect(() => {
     try {
       const storedLayout = window.localStorage.getItem(PALLET_MAP_STORAGE_KEY);
@@ -385,21 +289,6 @@ export default function App() {
     }
   }, [savedPalletLayout]);
   useEffect(() => {
-    if (
-      !focusedPastShipmentId ||
-      activeTab !== "shipments" ||
-      activeShipmentSubtab !== "past"
-    ) {
-      return;
-    }
-
-    const target = document.getElementById(`past-shipment-${focusedPastShipmentId}`);
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-      setFocusedPastShipmentId(null);
-    }
-  }, [focusedPastShipmentId, activeTab, activeShipmentSubtab, shipments]);
-  useEffect(() => {
     if (!draggingPallet || !isEditingPalletMap) {
       return undefined;
     }
@@ -435,16 +324,9 @@ export default function App() {
       window.removeEventListener("pointerup", handlePointerUp);
     };
   }, [draggingPallet, isEditingPalletMap]);
-  function jumpToPastShipment(shipmentId, shipmentName, shipmentKind = "inventory") {
+  function jumpToPastShipment(shipmentId, shipmentName) {
     setActiveTab("shipments");
-    if (shipmentKind === "non-inventory") {
-      setActiveShipmentSubtab("non-inventory");
-      setNonInventoryShipmentSearch(shipmentName || "");
-      return;
-    }
-    setActiveShipmentSubtab("past");
-    setPastShipmentSearchTerm(shipmentName || "");
-    setFocusedPastShipmentId(shipmentId);
+    setShipmentFocus({ id: shipmentId, name: shipmentName || "", nonce: Date.now() });
   }
   function clearInventoryFilters() {
     setSelectedExpiration([]);
@@ -783,75 +665,7 @@ export default function App() {
       ) : null}
 
       {!loading && !error && activeTab === "shipments" ? (
-<Shipments
-          activeShipmentSubtab={activeShipmentSubtab}
-          currentShipmentSearchTerm={currentShipmentSearchTerm}
-          currentShipmentStatusFilter={currentShipmentStatusFilter}
-          currentShipmentTypeFilter={currentShipmentTypeFilter}
-          currentShipments={currentShipments}
-          editingShipmentField={editingShipmentField}
-          editingShipmentNotesId={editingShipmentNotesId}
-          editingShipmentNotesValue={editingShipmentNotesValue}
-          editingShipmentValue={editingShipmentValue}
-          expandedShipmentIds={expandedShipmentIds}
-          items={items}
-          nonInventoryShipmentLocation={nonInventoryShipmentLocation}
-          nonInventoryShipmentSearch={nonInventoryShipmentSearch}
-          nonInventoryShipments={nonInventoryShipments}
-          nonInventoryValuationSort={nonInventoryValuationSort}
-          openDetailsModal={openDetailsModal}
-          pastShipmentSearchTerm={pastShipmentSearchTerm}
-          pastShipmentStatusDateFilter={pastShipmentStatusDateFilter}
-          pastShipmentTypeFilter={pastShipmentTypeFilter}
-          pastShipments={pastShipments}
-          setActiveShipmentSubtab={setActiveShipmentSubtab}
-          setAddingSupplyIdsShipmentId={setAddingSupplyIdsShipmentId}
-          setBulkConsolidationCheck={setBulkConsolidationCheck}
-          setConsolidatingShipmentItem={setConsolidatingShipmentItem}
-          setCurrentShipmentSearchTerm={setCurrentShipmentSearchTerm}
-          setCurrentShipmentStatusFilter={setCurrentShipmentStatusFilter}
-          setCurrentShipmentTypeFilter={setCurrentShipmentTypeFilter}
-          setDeliveringShipmentId={setDeliveringShipmentId}
-          setDeliveryDate={setDeliveryDate}
-          setDeliveryDateMode={setDeliveryDateMode}
-          setEditingShipmentField={setEditingShipmentField}
-          setEditingShipmentNotesId={setEditingShipmentNotesId}
-          setEditingShipmentNotesValue={setEditingShipmentNotesValue}
-          setEditingShipmentValue={setEditingShipmentValue}
-          setExpandedShipmentIds={setExpandedShipmentIds}
-          setIsCreateShipmentModalOpen={setIsCreateShipmentModalOpen}
-          setIsNonInventoryShipmentModalOpen={setIsNonInventoryShipmentModalOpen}
-          setNewShipmentPointOfContact={setNewShipmentPointOfContact}
-          setNewShipmentRecipientName={setNewShipmentRecipientName}
-          setNewShipmentRecipientPointOfContact={setNewShipmentRecipientPointOfContact}
-          setNewShipmentSupplyIds={setNewShipmentSupplyIds}
-          setNewShipmentType={setNewShipmentType}
-          setNonInventoryClinicName={setNonInventoryClinicName}
-          setNonInventoryPointOfContact={setNonInventoryPointOfContact}
-          setNonInventoryShipmentDate={setNonInventoryShipmentDate}
-          setNonInventoryShipmentLocation={setNonInventoryShipmentLocation}
-          setNonInventoryShipmentSearch={setNonInventoryShipmentSearch}
-          setNonInventoryShipmentType={setNonInventoryShipmentType}
-          setNonInventoryValuation={setNonInventoryValuation}
-          setNonInventoryValuationSort={setNonInventoryValuationSort}
-          setPastShipmentSearchTerm={setPastShipmentSearchTerm}
-          setPastShipmentStatusDateFilter={setPastShipmentStatusDateFilter}
-          setPastShipmentTypeFilter={setPastShipmentTypeFilter}
-          setRequestedUnitsValue={setRequestedUnitsValue}
-          setRequestingShipmentItem={setRequestingShipmentItem}
-          setReturningShipmentItem={setReturningShipmentItem}
-          setReturningShipmentItems={setReturningShipmentItems}
-          setRevertingDeliveredShipmentId={setRevertingDeliveredShipmentId}
-          setShipmentDate={setShipmentDate}
-          setShipmentNotes={setShipmentNotes}
-          setShipmentSupplyIdsInput={setShipmentSupplyIdsInput}
-          setShipments={setShipments}
-          setShippingShipmentId={setShippingShipmentId}
-          setTransportType={setTransportType}
-          setTransportTypeOther={setTransportTypeOther}
-          shipmentNotes={shipmentNotes}
-          shipments={shipments}
-        />
+<Shipments items={items} state={shipmentsState} focus={shipmentFocus} />
       ) : null}
 
       {!loading && !error && activeTab === "shipment-kpis" ? (
@@ -880,69 +694,33 @@ export default function App() {
       ) : null}
 
 <ShipmentModals
-          currentShipments={currentShipments}
-          deliveryDate={deliveryDate}
-          deliveryDateMode={deliveryDateMode}
-          isCreateShipmentModalOpen={isCreateShipmentModalOpen}
-          isNonInventoryShipmentModalOpen={isNonInventoryShipmentModalOpen}
           isShipmentItemsDataOpen={isShipmentItemsDataOpen}
-          isShipmentModalOpen={isShipmentModalOpen}
           isShipmentValueDataOpen={isShipmentValueDataOpen}
-          items={items}
-          itemsFromSupplyIds={itemsFromSupplyIds}
           jumpToPastShipment={jumpToPastShipment}
-          newShipmentPointOfContact={newShipmentPointOfContact}
-          newShipmentRecipientName={newShipmentRecipientName}
-          newShipmentRecipientPointOfContact={newShipmentRecipientPointOfContact}
-          newShipmentSupplyIds={newShipmentSupplyIds}
-          newShipmentType={newShipmentType}
-          nonInventoryClinicName={nonInventoryClinicName}
-          nonInventoryPointOfContact={nonInventoryPointOfContact}
-          nonInventoryShipmentDate={nonInventoryShipmentDate}
-          nonInventoryShipmentType={nonInventoryShipmentType}
-          nonInventoryValuation={nonInventoryValuation}
-          pendingShipmentItems={pendingShipmentItems}
-          selectedShipmentId={selectedShipmentId}
           setActiveShipmentSubtab={setActiveShipmentSubtab}
           setActiveTab={setActiveTab}
-          setDeliveryDate={setDeliveryDate}
-          setDeliveryDateMode={setDeliveryDateMode}
-          setIsCreateShipmentModalOpen={setIsCreateShipmentModalOpen}
-          setIsNonInventoryShipmentModalOpen={setIsNonInventoryShipmentModalOpen}
           setIsShipmentItemsDataOpen={setIsShipmentItemsDataOpen}
-          setIsShipmentModalOpen={setIsShipmentModalOpen}
           setIsShipmentValueDataOpen={setIsShipmentValueDataOpen}
-          setNewShipmentPointOfContact={setNewShipmentPointOfContact}
-          setNewShipmentRecipientName={setNewShipmentRecipientName}
-          setNewShipmentRecipientPointOfContact={setNewShipmentRecipientPointOfContact}
-          setNewShipmentSupplyIds={setNewShipmentSupplyIds}
-          setNewShipmentType={setNewShipmentType}
-          setNonInventoryClinicName={setNonInventoryClinicName}
-          setNonInventoryPointOfContact={setNonInventoryPointOfContact}
-          setNonInventoryShipmentDate={setNonInventoryShipmentDate}
-          setNonInventoryShipmentType={setNonInventoryShipmentType}
-          setNonInventoryShipments={setNonInventoryShipments}
-          setNonInventoryValuation={setNonInventoryValuation}
-          setPendingShipmentItems={setPendingShipmentItems}
-          setSelectedInventoryIds={setSelectedInventoryIds}
-          setSelectedShipmentId={setSelectedShipmentId}
-          setShipmentDate={setShipmentDate}
-          setShipmentNotes={setShipmentNotes}
-          setShipments={setShipments}
-          setShippingShipmentId={setShippingShipmentId}
-          setTransportType={setTransportType}
-          setTransportTypeOther={setTransportTypeOther}
-          shipmentDate={shipmentDate}
           shipmentItemsByYearPoints={shipmentItemsByYearPoints}
           shipmentItemsKpiYear={shipmentItemsKpiYear}
-          shipmentNotes={shipmentNotes}
           shipmentValueByYearPoints={shipmentValueByYearPoints}
           shipmentValueKpiYear={shipmentValueKpiYear}
-          shipments={shipments}
-          shippingShipmentId={shippingShipmentId}
-          transportType={transportType}
-          transportTypeOther={transportTypeOther}
         />
+
+      {isShipmentModalOpen && pendingShipmentItems.length > 0 ? (
+        <AddItemsModal
+          items={items}
+          shipments={shipmentsState.shipments}
+          preselected={pendingShipmentItems}
+          onClose={() => {
+            setIsShipmentModalOpen(false);
+            setPendingShipmentItems([]);
+            setSelectedInventoryIds([]);
+          }}
+          onSetLines={shipmentsState.setLines}
+          onCreate={shipmentsState.create}
+        />
+      ) : null}
 
 <InventoryKpiModals
           activePalletId={activePalletId}
@@ -972,39 +750,6 @@ export default function App() {
 <InventoryDetailsModal
           detailsItem={detailsItem}
           setDetailsItem={setDetailsItem}
-        />
-
-<ShipmentActionModals
-          addingSupplyIdsShipmentId={addingSupplyIdsShipmentId}
-          bulkConsolidationCheck={bulkConsolidationCheck}
-          consolidatingShipmentItem={consolidatingShipmentItem}
-          currentShipments={currentShipments}
-          deliveringShipmentId={deliveringShipmentId}
-          deliveryDate={deliveryDate}
-          error={error}
-          items={items}
-          itemsFromSupplyIds={itemsFromSupplyIds}
-          requestedUnitsValue={requestedUnitsValue}
-          requestingShipmentItem={requestingShipmentItem}
-          returningShipmentItem={returningShipmentItem}
-          returningShipmentItems={returningShipmentItems}
-          revertingDeliveredShipmentId={revertingDeliveredShipmentId}
-          setAddingSupplyIdsShipmentId={setAddingSupplyIdsShipmentId}
-          setBulkConsolidationCheck={setBulkConsolidationCheck}
-          setConsolidatingShipmentItem={setConsolidatingShipmentItem}
-          setDeliveringShipmentId={setDeliveringShipmentId}
-          setDeliveryDate={setDeliveryDate}
-          setRequestedUnitsValue={setRequestedUnitsValue}
-          setRequestingShipmentItem={setRequestingShipmentItem}
-          setReturningShipmentItem={setReturningShipmentItem}
-          setReturningShipmentItems={setReturningShipmentItems}
-          setRevertingDeliveredShipmentId={setRevertingDeliveredShipmentId}
-          setShipmentNotes={setShipmentNotes}
-          setShipmentSupplyIdsInput={setShipmentSupplyIdsInput}
-          setShipments={setShipments}
-          shipmentNotes={shipmentNotes}
-          shipmentSupplyIdsInput={shipmentSupplyIdsInput}
-          shipments={shipments}
         />
     </main>
   );
