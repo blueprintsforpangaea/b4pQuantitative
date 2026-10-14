@@ -96,10 +96,18 @@ export function NewShipmentModal({ onClose, onCreate }) {
 export function NonInventoryModal({ onClose, onCreate, onPatch }) {
   const [form, setForm] = useState({ recipient: "", blueprints_contact: "", shipment_type: "Local", ship_date: new Date().toISOString().slice(0, 10), value: "", unit_count: "" });
   const [error, setError] = useState("");
+  // Id of a shipment that was created but not yet moved to shipped, so a retry never creates a second one.
+  const [createdId, setCreatedId] = useState(null);
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
 
   async function submit(event) {
     event.preventDefault();
+    if (createdId) {
+      const retried = await onPatch(createdId, { stage: "shipped" });
+      if (retried.ok) onClose();
+      else setError(retried.error);
+      return;
+    }
     if (!form.recipient.trim() || form.value === "" || Number(form.value) < 0) {
       setError("Enter the clinic name and a value of zero or more.");
       return;
@@ -113,6 +121,7 @@ export function NonInventoryModal({ onClose, onCreate, onPatch }) {
       return;
     }
     // A new shipment starts as planned; with no lines, moving it to shipped takes no stock.
+    setCreatedId(result.result.id);
     const moved = await onPatch(result.result.id, { stage: "shipped" });
     if (moved.ok) onClose();
     else setError(moved.error);

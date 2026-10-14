@@ -25,7 +25,7 @@ export default function ShipmentPrint({ shipment, today = new Date().toISOString
   return createPortal(
     <section className="shipment-print" aria-hidden="true">
       <header>
-        <p>Blueprints for Pangea</p>
+        <p>Blueprints for Pangaea</p>
         <h1>Shipment report: {shipment.name}</h1>
       </header>
       <dl className="shipment-print-details">

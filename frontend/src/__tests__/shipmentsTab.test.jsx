@@ -137,4 +137,38 @@ describe("Shipments tab", () => {
     expect(screen.getByText("Expired")).toBeTruthy();
     expect(screen.getByText("No expiry date")).toBeTruthy();
   });
+
+  it("prints the correct organisation name", async () => {
+    render(<Harness api={await seededApi()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Test Clinic/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Print/ }));
+    await waitFor(() => expect(document.querySelector(".shipment-print")).toBeTruthy());
+    expect(document.querySelector(".shipment-print").textContent).toContain("Blueprints for Pangaea");
+  });
+
+  it("retries only the ship step when recording a non-inventory shipment fails midway", async () => {
+    const api = createMockApi(inventory);
+    const realPatch = api.patch;
+    let failOnce = true;
+    api.patch = async (...args) => {
+      if (failOnce) {
+        failOnce = false;
+        throw Object.assign(new Error("network blip"), { status: 0 });
+      }
+      return realPatch(...args);
+    };
+    const create = vi.spyOn(api, "create");
+    render(<Harness api={api} />);
+    await screen.findByText(/No active shipments/);
+    fireEvent.click(screen.getByRole("button", { name: "Record non-inventory" }));
+    const field = (label) => screen.getByText(label).closest("label").querySelector("input");
+    fireEvent.change(field("Clinic or recipient"), { target: { value: "Test Clinic Z" } });
+    fireEvent.change(field("Value (USD)"), { target: { value: "120" } });
+    fireEvent.click(screen.getByRole("button", { name: "Record shipment" }));
+    expect(await screen.findByText("network blip")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Record shipment" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(await api.list("all")).toHaveLength(1);
+  });
 });
