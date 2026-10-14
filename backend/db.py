@@ -121,10 +121,11 @@ def fetch_allocations() -> List[Dict[str, Any]]:
         return conn.execute("SELECT * FROM dash_allocations").fetchall()
 
 
-def create_shipment(header: Dict[str, Any], lines: List[Dict[str, Any]]) -> str:
+def create_shipment(header: Dict[str, Any], lines: List[Dict[str, Any]], shipment_id: Optional[str] = None) -> str:
+    """create_shipment(); with shipment_id a retry of the same id returns the existing shipment unchanged."""
     from psycopg.types.json import Jsonb
     with _connect() as conn:
-        return conn.execute("SELECT create_shipment(NULL, %s, %s) AS id", (Jsonb(header), Jsonb(lines))).fetchone()["id"]
+        return conn.execute("SELECT create_shipment(%s, %s, %s) AS id", (shipment_id, Jsonb(header), Jsonb(lines))).fetchone()["id"]
 
 
 def update_shipment(shipment_id: str, patch: Dict[str, Any]) -> bool:
@@ -148,12 +149,31 @@ def set_line_flags(shipment_id: str, line_id: int, picked: Optional[bool], conso
         return conn.execute("SELECT set_shipment_line_flags(%s, %s, %s) AS ok", (line_id, picked, consolidated)).fetchone()["ok"]
 
 
-def import_shipments(plans: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Create each planned shipment ({id, header, lines}) in its own savepoint.
+IMPORT_ERRORS = {
+    "invalid_data": "Invalid data in this shipment.",
+    "over_allocation": "Not enough stock available for one of the lines.",
+    "item_not_found": "A line refers to an item that does not exist.",
+    "rejected": "The shipment was rejected as invalid.",
+    "missing_id": "The old shipment has no id.",
+}
 
-    Returns {created, skipped, errors: [{id, reason}]}. A shipment whose id already exists is skipped.
-    Lines naming an item that is not in dash_items are turned into free-text lines first.
+
+def import_error(plan: Dict[str, Any], code: str, **extra: Any) -> Dict[str, Any]:
+    """Stable error entry; `reason` repeats `message` for callers written against {id, reason}."""
+    message = IMPORT_ERRORS.get(code, code)
+    return {"index": plan.get("index"), "source": plan.get("source"), "id": plan.get("id"), "code": code,
+            "message": message, "reason": message, **extra}
+
+
+def import_shipments(plans: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Create each planned shipment ({id, index, source, header, lines}) in its own savepoint.
+
+    Returns {created, skipped, errors: [{index, source, id, code, message, reason}]}. A shipment whose id already
+    exists is skipped. Lines naming an item that is not in dash_items are turned into free-text lines first.
+    Driver error text is logged here and never returned.
     """
+    import json as _json
+    import logging
     from psycopg.types.json import Jsonb
     created = skipped = 0
     errors: List[Dict[str, Any]] = []
@@ -174,8 +194,29 @@ def import_shipments(plans: List[Dict[str, Any]]) -> Dict[str, Any]:
                             lines.append({k: v for k, v in line.items() if k != "item_id"})
                     conn.execute("SELECT create_shipment(%s, %s, %s, true)", (sid, Jsonb(plan["header"]), Jsonb(lines)))
                     created += 1
-            except psycopg.errors.DataError as exc:
-                errors.append({"id": sid, "reason": "Invalid data in this shipment."})  # driver text is not shown
-            except (psycopg.errors.RaiseException, psycopg.errors.CheckViolation, psycopg.errors.NoDataFound) as exc:
-                errors.append({"id": sid, "reason": exc.diag.message_primary or "rejected"})
+            except psycopg.errors.OperationalError:
+                raise
+            except psycopg.Error as exc:
+                logging.getLogger("uvicorn.error").warning("shipment import %r rejected: %s", sid, exc)
+                extra: Dict[str, Any] = {}
+                if isinstance(exc, psycopg.errors.CheckViolation):
+                    code = "over_allocation"
+                    try:
+                        extra = _json.loads(exc.diag.message_detail or "{}")
+                    except ValueError:
+                        pass
+                elif isinstance(exc, psycopg.errors.NoDataFound):
+                    code = "item_not_found"
+                elif isinstance(exc, psycopg.errors.DataError):
+                    code = "invalid_data"
+                elif isinstance(exc, psycopg.errors.RaiseException):
+                    code = "rejected"
+                else:
+                    raise
+                errors.append(import_error(plan, code, **extra))
     return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def shipment_exists(shipment_id: str) -> bool:
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM dash_shipment WHERE id = %s", (shipment_id,)).fetchone() is not None

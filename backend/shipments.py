@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -48,6 +48,10 @@ def db_error(exc: Exception) -> JSONResponse:
 
 
 class ShipmentCreate(BaseModel):
+    # optional client key: a retry with the same id returns the existing shipment (200) instead of creating another
+    id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,100}$")
+    stage: Optional[str] = None   # only kind=non_inventory may start as shipped/delivered; otherwise planned
+    delivered_date: Optional[str] = None
     name: str = Field(max_length=200)
     recipient: Optional[str] = None
     shipment_type: Optional[str] = None
@@ -187,9 +191,11 @@ def build_router(require_admin, require_db, clear_items_cache) -> APIRouter:
 
     @router.post("/shipments", dependencies=admin)
     def create_shipment(payload: ShipmentCreate):
-        header = payload.model_dump(exclude_unset=True, exclude={"lines"})
+        header = payload.model_dump(exclude_unset=True, exclude={"lines", "id"})
         try:
-            sid = db.create_shipment(header, payload.lines)
+            if payload.id and db.shipment_exists(payload.id):
+                return shipment_response(payload.id, 200)
+            sid = db.create_shipment(header, payload.lines, payload.id)
             clear_items_cache()
             return shipment_response(sid, 201)
         except db.Error as exc:
@@ -226,22 +232,31 @@ def build_router(require_admin, require_db, clear_items_cache) -> APIRouter:
             return db_error(exc)
 
     @router.get("/allocations", dependencies=[Depends(require_db)])
-    def list_allocations():
-        """Units promised to active shipments. Public like /items (the inventory tabs show it without the admin token)."""
+    def list_allocations(x_admin_token: Optional[str] = Header(None)):
+        """Units promised to active shipments. Public like /items, but without a valid admin token only
+        {item_id, stage, quantity}; shipment_id and shipment_name need the token."""
         try:
-            return db.fetch_allocations()
+            rows = db.fetch_allocations()
         except db.Error as exc:
             return db_error(exc)
+        try:
+            require_admin(x_admin_token)
+            return rows
+        except HTTPException:
+            return [{"item_id": r["item_id"], "stage": r["stage"], "quantity": r["quantity"]} for r in rows]
 
     @router.post("/shipments/import", dependencies=admin)
     def import_old_shipments(body: ImportBody):
         plans: List[Dict[str, Any]] = []
         errors: List[Dict[str, Any]] = []
-        for old, plan_fn in [(o, plan_old_shipment) for o in body.shipments] + [(o, plan_non_inventory) for o in body.non_inventory]:
-            try:
-                plans.append(plan_fn(old))
-            except ValueError as exc:
-                errors.append({"id": old.get("id") if isinstance(old, dict) else None, "reason": str(exc)})
+        for source, olds, plan_fn in (("shipments", body.shipments, plan_old_shipment),
+                                      ("non_inventory", body.non_inventory, plan_non_inventory)):
+            for index, old in enumerate(olds):
+                try:
+                    plans.append({**plan_fn(old), "index": index, "source": source})
+                except ValueError:
+                    errors.append(db.import_error({"index": index, "source": source,
+                                                   "id": old.get("id") if isinstance(old, dict) else None}, "missing_id"))
         try:
             result = db.import_shipments(plans)
             clear_items_cache()

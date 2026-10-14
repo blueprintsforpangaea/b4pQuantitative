@@ -77,7 +77,7 @@ def test_writes_need_the_admin_token(client):
         assert getattr(anon, method)(path, json=body).status_code == 401, path
         assert getattr(anon, method)(path, json=body, headers={"X-Admin-Token": "bad"}).status_code == 401, path
     assert anon.get("/shipments").status_code == 401
-    assert anon.get("/allocations").status_code == 200   # public like /items
+    assert anon.get("/allocations").status_code == 200   # public like /items (reduced, see test_allocations_hide_shipment_names)
 
 
 def test_create_get_scopes_and_totals(client):
@@ -94,6 +94,13 @@ def test_create_get_scopes_and_totals(client):
     assert client.get("/shipments/nope").status_code == 404
     assert client.get("/shipments?scope=bogus").status_code == 422
     assert {(a["shipment_id"], a["quantity"]) for a in client.get("/allocations").json()} == {(s["id"], 4), (s["id"], 2)}
+    # without a token only {item_id, stage, quantity}
+    for tokenless in (TestClient(appmod.app).get("/allocations"), TestClient(appmod.app).get("/allocations", headers={"X-Admin-Token": "wrong"})):
+        assert tokenless.status_code == 200
+        assert sorted(tokenless.json(), key=lambda a: a["quantity"]) == sorted(
+            [{"item_id": it["Test gloves M"], "stage": "planned", "quantity": 4}, {"item_id": it["Test gloves L"], "stage": "planned", "quantity": 2}],
+            key=lambda a: a["quantity"])
+    assert "shipment_name" not in TestClient(appmod.app).get("/allocations").text
 
 
 def test_over_allocation_is_409_with_clear_body(client):
@@ -161,6 +168,10 @@ def test_import_old_localstorage_shipments(client):
     assert r.status_code == 200, r.text
     out = r.json()
     assert (out["created"], out["skipped"]) == (3, 0) and {e["id"] for e in out["errors"]} == {"shipment-3", None}
+    by_id = {e["id"]: e for e in out["errors"]}
+    assert (by_id["shipment-3"]["code"], by_id["shipment-3"]["index"], by_id["shipment-3"]["source"]) == ("over_allocation", 2, "shipments")
+    assert by_id["shipment-3"]["available"] == 5 and by_id["shipment-3"]["requested"] == 99
+    assert (by_id[None]["code"] or "") in ("missing_id",)
     assert out["created"] + out["skipped"] + len(out["errors"]) == 6
     got = {s["id"]: s for s in client.get("/shipments").json()}
     a = got["shipment-1"]
@@ -205,3 +216,26 @@ def test_import_reason_never_contains_driver_text(client):
     assert r.status_code == 200
     for e in r.json()["errors"]:
         assert "LINE" not in e["reason"] and "psycopg" not in e["reason"]
+
+
+def test_non_inventory_shipment_created_directly_and_retry_safe(client):
+    it = ids(client)
+    body = {"id": "client-1", "name": "Walk-in", "kind": "non_inventory", "stage": "shipped", "ship_date": "2026-02-01", "value": 250}
+    r = client.post("/shipments", json=body)
+    assert r.status_code == 201 and r.json()["stage"] == "shipped" and r.json()["totals"]["value"] == 250 and r.json()["id"] == "client-1"
+    r2 = client.post("/shipments", json=body)                       # retry: same shipment, no duplicate
+    assert r2.status_code == 200 and r2.json()["id"] == "client-1"
+    assert len(client.get("/shipments").json()) == 1
+    qty = {i["name"]: i["quantity"] for i in client.get("/items").json()}
+    assert qty["Test gauze"] == 5                                  # no stock effect
+    r3 = client.post("/shipments", json={"name": "Inv", "stage": "shipped", "lines": [{"item_id": it["Test gauze"], "quantity": 1}]})
+    assert r3.status_code == 400                                   # inventory shipments start planned
+    assert client.post("/shipments", json={"id": "bad id!", "name": "x"}).status_code == 422
+
+
+def test_import_error_text_is_stable_and_has_no_driver_text(client):
+    r = client.post("/shipments/import", json={"shipments": [{"id": "s1", "recipientName": "A", "isCompleted": True,
+                                                              "shipmentDate": "2026-13-45", "items": []}]})
+    out = r.json()
+    for e in out["errors"]:
+        assert set(e) >= {"index", "code", "message"} and "LINE" not in e["message"] and "date/time" not in e["message"]
