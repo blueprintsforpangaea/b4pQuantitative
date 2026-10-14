@@ -101,10 +101,12 @@
 
 .ship-list {
   display: grid;
+  min-width: 0;
   gap: 8px;
 }
 
 .ship-card {
+  min-width: 0;
   border: 1px solid var(--bp-line-strong);
   border-radius: 3px;
   background: var(--bp-surface);
@@ -257,7 +259,7 @@
 
 .ship-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
   gap: 8px 12px;
   margin: 10px 0;
 }
@@ -293,6 +295,7 @@
 }
 
 .ship-lines-scroll {
+  position: relative;
   overflow-x: auto;
 }
 
@@ -530,9 +533,24 @@
     break-inside: avoid;
   }
 
-  .shipment-print td:first-child {
-    width: 30%;
+  .shipment-print table {
+    table-layout: fixed;
+    min-width: 0;
   }
+
+  .shipment-print th,
+  .shipment-print td {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+
+  .shipment-print th:nth-child(1) { width: 22%; }
+  .shipment-print th:nth-child(2) { width: 9%; }
+  .shipment-print th:nth-child(3) { width: 19%; }
+  .shipment-print th:nth-child(4) { width: 12%; }
+  .shipment-print th:nth-child(5) { width: 18%; }
+  .shipment-print th:nth-child(6) { width: 7%; }
+  .shipment-print th:nth-child(7) { width: 13%; }
 
   .shipment-print thead {
     display: table-header-group;
@@ -556,7 +574,8 @@
   }
 
   .ship-step-label {
-    font-size: 0.66rem;
+    font-size: 0.58rem;
+    letter-spacing: -0.01em;
   }
 
   .ship-step-date {
