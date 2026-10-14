@@ -1,0 +1,295 @@
+/* phone and print overrides, Requests and Stock Alerts tables */
+.error-panel {
+  color: #8A2412;
+  background: #FFF1EE;
+  border-color: rgba(138, 31, 31, 0.12);
+}
+
+@media (max-width: 720px) {
+  .dashboard-logo {
+    top: 50%;
+    height: 42px;
+  }
+
+  .page-shell {
+    width: min(100% - 20px, 1240px);
+    padding-top: 16px;
+  }
+
+  .panel,
+  .summary-card {
+    padding: 18px;
+    border-radius: 0 16px 16px 16px;
+  }
+
+  .panel-header {
+    flex-direction: column;
+  }
+
+  .inventory-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-drawer {
+    width: min(340px, calc(100vw - 20px));
+  }
+
+  .inventory-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .floating-inventory-actions {
+    top: 12px;
+    right: 12px;
+    max-width: calc(100vw - 24px);
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .kpi-analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .shipment-line-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .create-shipment-bar {
+    flex-direction: column;
+  }
+
+  .shipment-card-header {
+    flex-direction: column;
+  }
+
+  .shipment-chart-cluster {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .shipment-chart-cluster .shipment-distribution-card {
+    width: 100%;
+  }
+
+  .shipment-card-meta {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+}
+
+/* Dates and history lines keep tabular figures so they stay aligned. */
+.expiration-cell > span:first-child,
+.shipment-expiration > span:first-child,
+.shipment-item-id-row > strong,
+.shipment-history-list span,
+.non-inventory-shipment-details dd {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Column headers in the drafting annotation voice. */
+thead th {
+  font-family: var(--bp-body);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--bp-ink-faint);
+}
+
+/* Respect a reduced-motion preference across the whole sheet. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The title block stacks on narrow screens rather than crushing its cells. */
+@media (max-width: 900px) {
+  .top-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .title-block {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .title-block-cell:first-child {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--bp-line);
+  }
+
+  .title-block-cell:nth-child(2) {
+    border-left: 0;
+  }
+
+  .title-block-logo {
+    border-left: 0;
+    border-top: 1px solid var(--bp-line);
+    justify-content: flex-start;
+  }
+}
+
+/* Narrow screens (360px): single column everywhere, nothing wider than the viewport. */
+@media (max-width: 720px) {
+  .kpi-card-half,
+  .kpi-card-third,
+  .kpi-card-full {
+    grid-column: 1 / -1;
+  }
+
+  .kpi-analytics-grid > *,
+  .shipment-kpi-grid > *,
+  .shipment-kpi-overview-split > *,
+  .shipment-kpi-column > * {
+    min-width: 0;
+  }
+
+  .shipment-kpi-overview-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shipment-kpi-table-wrap {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .expiration-pie-layout,
+  .category-pie-card .expiration-pie-layout,
+  .kpi-compact-card .expiration-pie-layout {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+
+  .expiration-pie-legend {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .shipment-subtabs {
+    flex-wrap: wrap;
+  }
+
+  .shipment-subtab {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .shipment-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shipment-card {
+    min-width: 0;
+  }
+
+  .shipment-card-left-column,
+  .shipment-card-title {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* Requests: let cells wrap so every column, including the packing-list button, fits at 1280px. */
+.requests-table th,
+.requests-table td,
+.alerts-table th,
+.alerts-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+@media (max-width: 900px) {
+  .title-block-cell.sync-cell {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--bp-line);
+  }
+}
+
+.requests-table,
+.alerts-table {
+  min-width: 0; /* the global table rule forces 1320px */
+}
+
+/* The global per-column table rules are tuned for the inventory table; reset them for requests. */
+.requests-table th:nth-child(n),
+.requests-table td:nth-child(n),
+.alerts-table th:nth-child(n),
+.alerts-table td:nth-child(n) {
+  width: auto;
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
+.requests-table th:nth-child(3),
+.requests-table td:nth-child(3) {
+  min-width: 200px;
+}
+
+.alerts-table th,
+.alerts-table td {
+  vertical-align: top;
+}
+
+/* In the stacked (column) layout a "flex: 1 1 420px" basis becomes a 420px HEIGHT; keep controls their natural height. */
+@media (max-width: 720px) {
+  .create-shipment-bar > *,
+  .create-shipment-bar .search-input {
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Requests as stacked cards on phones instead of a sideways-scrolling table. */
+@media (max-width: 720px) {
+  .requests-table,
+  .requests-table tbody,
+  .requests-table tr,
+  .requests-table th[scope="row"],
+  .requests-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .requests-table thead {
+    position: absolute;
+    left: -9999px; /* hidden visually, still read by screen readers */
+  }
+
+  .requests-table tr {
+    border: 1px solid #ececec;
+    border-radius: 14px;
+    margin-bottom: 14px;
+    padding: 6px 0;
+    background: #fff;
+  }
+
+  .requests-table th[scope="row"],
+  .requests-table td {
+    border-bottom: 0;
+    padding: 6px 14px;
+  }
+
+  .requests-table [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #8f8f8f;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+}

@@ -1,0 +1,440 @@
+/* Inventory KPIs: chart cards, pies, pallet map */
+.expiry-chart-card {
+  margin-bottom: 20px;
+  padding: 18px;
+  border-radius: 18px;
+  background: #fafafa;
+  border: 1px solid #ececec;
+}
+
+.kpi-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 32px;
+  margin-bottom: 20px;
+}
+
+.kpi-card-half {
+  grid-column: span 3;
+}
+
+.kpi-card-full {
+  grid-column: 1 / -1;
+}
+
+.kpi-card-third {
+  grid-column: span 2;
+}
+
+.expiry-chart-card.compact,
+.analytics-placeholder-card {
+  margin-bottom: 0;
+  min-height: 320px;
+}
+
+.expiry-chart-card h4 {
+  margin: 0 0 16px;
+  font-family: var(--bp-display);
+  color: #212121;
+}
+
+.expiration-pie-layout {
+  display: grid;
+  grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+  gap: 26px;
+  align-items: center;
+}
+
+.expiration-pie-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.expiration-pie-chart {
+  position: relative;
+  width: 200px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.expiration-pie-chart::after {
+  content: "";
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(236, 236, 236, 0.9);
+}
+
+.expiration-pie-center {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.expiration-pie-center strong {
+  font-family: var(--bp-display);
+  font-size: 1.55rem;
+  line-height: 1;
+  color: #212121;
+}
+
+.expiration-pie-center span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #8f8f8f;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.expiration-pie-legend {
+  display: grid;
+  gap: 12px;
+}
+
+.expiration-pie-legend-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.expiration-pie-legend-row.active {
+  border-color: #a8a8a8;
+  background: #f4f4f4;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
+}
+
+.expiration-pie-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  margin-top: 4px;
+}
+
+.expiration-pie-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.expiration-pie-copy strong {
+  color: #212121;
+}
+
+.expiration-pie-copy span {
+  color: #8f8f8f;
+  font-size: 0.92rem;
+}
+
+.expiration-pie-copy .expiration-pie-click-hint {
+  margin-top: 4px;
+  color: #0337a3;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.pie-slice-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+}
+
+.pie-slice-hotspot {
+  fill: rgba(255, 255, 255, 0.001);
+  cursor: pointer;
+  transition: fill 120ms ease, stroke 120ms ease, stroke-width 120ms ease, filter 120ms ease;
+}
+
+.pie-slice-hotspot.active {
+  fill: rgba(255, 255, 255, 0.24);
+  stroke: #ffffff;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 8px rgba(0, 0, 0, 0.12));
+}
+
+.category-pie-card .expiration-pie-layout {
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+}
+
+.category-pie-card .expiration-pie-legend {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 14px;
+}
+
+.kpi-compact-card .expiration-pie-layout {
+  grid-template-columns: minmax(145px, 165px) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.kpi-compact-card .expiration-pie-chart {
+  width: 150px;
+}
+
+.kpi-compact-card .expiration-pie-chart::after {
+  inset: 22px;
+}
+
+.kpi-compact-card .expiration-pie-center strong {
+  font-size: 1.2rem;
+}
+
+.kpi-compact-card .expiration-pie-center span {
+  font-size: 0.74rem;
+}
+
+.kpi-compact-card .expiration-pie-legend {
+  gap: 8px;
+}
+
+.kpi-compact-card .expiration-pie-legend-row {
+  padding: 8px 10px;
+}
+
+.kpi-compact-card .expiration-pie-copy strong {
+  font-size: 0.9rem;
+}
+
+.kpi-compact-card .expiration-pie-copy span {
+  font-size: 0.8rem;
+}
+
+.pallet-map-card {
+  margin-top: 4px;
+}
+
+.pallet-map-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pallet-map-scroll {
+  width: 100%;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+
+.pallet-map-canvas {
+  position: relative;
+  width: 1520px;
+  min-height: 1120px;
+  overflow: hidden;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(250, 250, 250, 0.98) 0%, rgba(244, 244, 244, 0.94) 100%),
+    radial-gradient(circle at top left, rgba(143, 180, 222, 0.2), transparent 38%);
+  border: 1px solid #ececec;
+}
+
+.pallet-map-canvas.is-editing {
+  box-shadow: inset 0 0 0 2px rgba(13, 59, 111, 0.14);
+}
+
+.pallet-card {
+  position: absolute;
+  width: 198px;
+  height: 198px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #d5d5d5;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.08);
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  user-select: none;
+}
+
+.pallet-card.is-editing {
+  cursor: grab;
+  touch-action: none;
+}
+
+.pallet-card-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  color: #212121;
+}
+
+.pallet-card-copy {
+  display: grid;
+  gap: 4px;
+  color: #646464;
+  font-size: 0.88rem;
+}
+
+.pallet-card-box-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.pallet-box-pill {
+  border-radius: 12px;
+  padding: 5px 7px;
+  background: #f4f4f4;
+  color: #2b2b2b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.pallet-modal {
+  max-width: 1120px;
+}
+
+.pallet-modal-metrics {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pallet-modal-metric-card {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fafafa;
+  border: 1px solid #ececec;
+  display: grid;
+  gap: 4px;
+}
+
+.pallet-modal-metric-card span {
+  color: #8f8f8f;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pallet-modal-metric-card strong {
+  color: #212121;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.pallet-modal-supplies {
+  margin: 8px 0 0;
+  color: #8A2412;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.pallet-mini-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.pallet-mini-chart-card {
+  padding: 16px;
+  border-radius: 18px;
+  background: #fafafa;
+  border: 1px solid #ececec;
+  display: grid;
+  gap: 12px;
+}
+
+.pallet-mini-chart-title {
+  font-family: var(--bp-display);
+  color: #212121;
+  font-size: 1rem;
+}
+
+.pallet-mini-chart-wrap {
+  position: relative;
+  min-height: 170px;
+  display: grid;
+  place-items: center;
+}
+
+.pallet-mini-chart {
+  position: relative;
+  width: 140px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.pallet-mini-chart::after {
+  content: "";
+  position: absolute;
+  inset: 24px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(236, 236, 236, 0.9);
+}
+
+.pallet-mini-tooltip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -105%);
+  min-width: 170px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #212121;
+  color: #ffffff;
+  display: grid;
+  gap: 4px;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.16);
+  z-index: 4;
+  pointer-events: none;
+  font-size: 0.84rem;
+}
+
+.pallet-mini-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 14px;
+  height: 14px;
+  background: #212121;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.analytics-placeholder-card {
+  padding: 18px;
+  border-radius: 18px;
+  background: #fafafa;
+  border: 1px dashed #d5d5d5;
+}
+
+.analytics-placeholder-card h4 {
+  margin: 0;
+  color: #8f8f8f;
+  font-family: var(--bp-display);
+}
+
+.kpi-note-card {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #fafafa;
+  border: 1px solid #ececec;
+  color: #646464;
+}
+
+.kpi-note-card p:last-child {
+  margin-bottom: 0;
+}
