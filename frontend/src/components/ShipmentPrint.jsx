@@ -18,6 +18,7 @@ export default function ShipmentPrint({ shipment, today = new Date().toISOString
     ["Shipping method", shipment.shipping_method || "Not set"],
     ["Blueprints contact", shipment.blueprints_contact || "Not set"],
     ["Ship date", shipment.ship_date || "Not set"],
+    ["Expiry status as of", asOf],
     ["Delivered", shipment.delivered_date || "Not yet"],
     ["Request ID(s)", (shipment.request_ids || []).join(", ") || "None linked"],
   ];
@@ -36,7 +37,7 @@ export default function ShipmentPrint({ shipment, today = new Date().toISOString
       {shipment.notes ? <p className="shipment-print-notes"><strong>Notes:</strong> {shipment.notes}</p> : null}
       <table>
         <thead>
-          <tr><th>Item</th><th>Lot</th><th>Location</th><th>Expiry</th><th>Expiry status as of {asOf}</th><th>Qty</th><th>Value</th></tr>
+          <tr><th>Item</th><th>Lot</th><th>Location</th><th>Expiry</th><th>Status at ship</th><th>Qty</th><th>Value</th></tr>
         </thead>
         <tbody>
           {groups.flatMap((group) =>
@@ -57,7 +58,7 @@ export default function ShipmentPrint({ shipment, today = new Date().toISOString
           <tr><td colSpan="5">{totals.line_count} lines</td><td>{totals.units}</td><td>{formatMoney(totals.value)}</td></tr>
         </tfoot>
       </table>
-      <footer>Printed {today}</footer>
+      <footer>Printed {today}. Questions: contact@b4pglobal.org</footer>
     </section>,
     document.body
   );

@@ -466,7 +466,13 @@
 
 @media print {
   @page {
-    margin: 14mm;
+    margin: 14mm 14mm 18mm;
+
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font: 8pt system-ui, sans-serif;
+      color: #444;
+    }
   }
 
   #root {
@@ -562,6 +568,9 @@
   }
 
   .shipment-print footer {
+    position: fixed;
+    bottom: -12mm;
+    left: 0;
     margin-top: 10pt;
     font-size: 8pt;
     color: #444;
