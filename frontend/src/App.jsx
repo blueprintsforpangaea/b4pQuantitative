@@ -31,6 +31,7 @@ export default function App() {
   const [selectedExpiration, setSelectedExpiration] = useState([]);
   const [selectedDuration, setSelectedDuration] = useState([]);
   const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedExpiryTiers, setSelectedExpiryTiers] = useState([]);
   const [selectedPallets, setSelectedPallets] = useState([]);
   const [selectedBoxTypes, setSelectedBoxTypes] = useState([]);
   const [selectedWorkflowStatuses, setSelectedWorkflowStatuses] = useState([]);
@@ -450,6 +451,7 @@ export default function App() {
     setSelectedExpiration([]);
     setSelectedDuration([]);
     setSelectedCategories([]);
+    setSelectedExpiryTiers([]);
     setSelectedPallets([]);
     setSelectedBoxTypes([]);
     setSelectedWorkflowStatuses([]);
@@ -701,6 +703,7 @@ export default function App() {
           selectedCategories={selectedCategories}
           selectedDuration={selectedDuration}
           selectedExpiration={selectedExpiration}
+          selectedExpiryTiers={selectedExpiryTiers}
           selectedInventoryIds={selectedInventoryIds}
           selectedPallets={selectedPallets}
           selectedWorkflowStatuses={selectedWorkflowStatuses}
@@ -717,16 +720,13 @@ export default function App() {
           setSelectedCategories={setSelectedCategories}
           setSelectedDuration={setSelectedDuration}
           setSelectedExpiration={setSelectedExpiration}
+          setSelectedExpiryTiers={setSelectedExpiryTiers}
           setSelectedInventoryIds={setSelectedInventoryIds}
           setSelectedPallets={setSelectedPallets}
           setSelectedShipmentId={setSelectedShipmentId}
           setSelectedWorkflowStatuses={setSelectedWorkflowStatuses}
-          setShowAvailableItems={setShowAvailableItems}
-          setShowNonAvailableItems={setShowNonAvailableItems}
           setValuationRange={setValuationRange}
-          showAvailableItems={showAvailableItems}
           showFloatingInventoryAction={showFloatingInventoryAction}
-          showNonAvailableItems={showNonAvailableItems}
           valuationRange={valuationRange}
         />
       ) : null}
