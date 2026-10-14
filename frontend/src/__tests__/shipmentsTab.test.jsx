@@ -146,18 +146,21 @@ describe("Shipments tab", () => {
     expect(document.querySelector(".shipment-print").textContent).toContain("Blueprints for Pangaea");
   });
 
-  it("retries only the ship step when recording a non-inventory shipment fails midway", async () => {
+  it("records a non-inventory shipment in one call and a retry reuses the same client id", async () => {
     const api = createMockApi(inventory);
-    const realPatch = api.patch;
+    const realCreate = api.create;
+    const ids = [];
     let failOnce = true;
-    api.patch = async (...args) => {
+    api.create = async (body) => {
+      ids.push(body.id);
+      const created = await realCreate(body);
       if (failOnce) {
         failOnce = false;
-        throw Object.assign(new Error("network blip"), { status: 0 });
+        throw Object.assign(new Error("response lost"), { status: 0 });
       }
-      return realPatch(...args);
+      return created;
     };
-    const create = vi.spyOn(api, "create");
+    const patch = vi.spyOn(api, "patch");
     render(<Harness api={api} />);
     await screen.findByText(/No active shipments/);
     fireEvent.click(screen.getByRole("button", { name: "Record non-inventory" }));
@@ -165,10 +168,15 @@ describe("Shipments tab", () => {
     fireEvent.change(field("Clinic or recipient"), { target: { value: "Test Clinic Z" } });
     fireEvent.change(field("Value (USD)"), { target: { value: "120" } });
     fireEvent.click(screen.getByRole("button", { name: "Record shipment" }));
-    expect(await screen.findByText("network blip")).toBeTruthy();
+    expect(await screen.findByText("response lost")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Record shipment" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(await api.list("all")).toHaveLength(1);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toMatch(/^SHP-NI-/);
+    expect(ids[1]).toBe(ids[0]);
+    expect(patch).not.toHaveBeenCalled();
+    const all = await api.list("all");
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ kind: "non_inventory", stage: "shipped", value: 120 });
   });
 });

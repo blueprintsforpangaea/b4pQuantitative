@@ -113,7 +113,7 @@ export default function Shipments({ items, state, focus = null }) {
       ) : null}
 
       {modal === "new" ? <NewShipmentModal onClose={() => setModal(null)} onCreate={state.create} /> : null}
-      {modal === "non-inventory" ? <NonInventoryModal onClose={() => setModal(null)} onCreate={state.create} onPatch={state.patch} /> : null}
+      {modal === "non-inventory" ? <NonInventoryModal onClose={() => setModal(null)} onCreate={state.create} /> : null}
       {modal?.addTo ? <AddItemsModal items={items} shipments={shipments} shipmentId={modal.addTo} onClose={() => setModal(null)} onSetLines={state.setLines} onCreate={state.create} /> : null}
       <ShipmentPrint shipment={printing} />
     </section>

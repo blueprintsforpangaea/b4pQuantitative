@@ -93,26 +93,21 @@ export function NewShipmentModal({ onClose, onCreate }) {
 }
 
 // Shipped without inventory rows: header plus a dollar value and optional unit count.
-export function NonInventoryModal({ onClose, onCreate, onPatch }) {
+export function NonInventoryModal({ onClose, onCreate }) {
   const [form, setForm] = useState({ recipient: "", blueprints_contact: "", shipment_type: "Local", ship_date: new Date().toISOString().slice(0, 10), value: "", unit_count: "" });
   const [error, setError] = useState("");
-  // Id of a shipment that was created but not yet moved to shipped, so a retry never creates a second one.
-  const [createdId, setCreatedId] = useState(null);
+  // Client key: a retried submit returns the same shipment instead of creating a second one.
+  const [clientId] = useState(() => `SHP-NI-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`}`);
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
 
   async function submit(event) {
     event.preventDefault();
-    if (createdId) {
-      const retried = await onPatch(createdId, { stage: "shipped" });
-      if (retried.ok) onClose();
-      else setError(retried.error);
-      return;
-    }
     if (!form.recipient.trim() || form.value === "" || Number(form.value) < 0) {
       setError("Enter the clinic name and a value of zero or more.");
       return;
     }
     const result = await onCreate({
+      id: clientId, stage: "shipped",
       name: form.recipient.trim(), recipient: form.recipient.trim(), shipment_type: form.shipment_type, blueprints_contact: form.blueprints_contact,
       ship_date: form.ship_date, kind: "non_inventory", value: Number(form.value), unit_count: form.unit_count === "" ? null : Number(form.unit_count), lines: [],
     });
@@ -120,11 +115,7 @@ export function NonInventoryModal({ onClose, onCreate, onPatch }) {
       setError(result.error);
       return;
     }
-    // A new shipment starts as planned; with no lines, moving it to shipped takes no stock.
-    setCreatedId(result.result.id);
-    const moved = await onPatch(result.result.id, { stage: "shipped" });
-    if (moved.ok) onClose();
-    else setError(moved.error);
+    onClose();
   }
 
   return (

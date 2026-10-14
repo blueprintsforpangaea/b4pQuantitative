@@ -193,11 +193,13 @@ export function createMockApi(inventorySource = [], seed = []) {
     get: async (id) => decorate(need(id)),
     create: async (body) => {
       if (!body.name) throw new ApiError(400, "name is required");
+      if (body.id && shipments.has(body.id)) return decorate(shipments.get(body.id));
       const id = body.id || `SHP-${Math.floor(Date.now() / 1000)}-${String(++counter).padStart(3, "0")}`;
       const shipment = { id, stage: "planned", request_ids: [], kind: "inventory", ship_date: null, delivered_date: null, notes: "", recipient: "", shipment_type: "Local", shipping_method: "", blueprints_contact: "", unit_count: null, value: null, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), lines: [] };
       for (const key of HEADER_KEYS) if (body[key] !== undefined) shipment[key] = body[key];
       shipment.lines = buildLines(id, body.lines || []);
-      if (body.kind === "non_inventory") shipment.stage = "shipped";
+      if (body.kind === "non_inventory") shipment.stage = ["shipped", "delivered"].includes(body.stage) ? body.stage : "planned";
+      else if (body.stage && body.stage !== "planned") throw new ApiError(400, "an inventory shipment starts as planned");
       shipments.set(id, shipment);
       return decorate(shipment);
     },
