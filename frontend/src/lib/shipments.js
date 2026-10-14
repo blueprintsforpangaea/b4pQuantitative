@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { API_BASE } from "./config.js";
 import { todayIsoDate } from "./dates.js";
 import { sortItemsByExpiration, sortItemsByLocation } from "./inventory.js";
 
@@ -189,4 +191,89 @@ export function getShipmentItemsForDisplay(shipment) {
   }
 
   return shipment.items;
+}
+
+// Allocations: units of an item tied up in active (planned/pulling/consolidated) shipments.
+// GET /allocations -> [{ item_id, shipment_id, shipment_name, stage, quantity }]
+
+export async function fetchAllocations() {
+  try {
+    const response = await fetch(`${API_BASE}/allocations`);
+    if (response.status === 404 || response.status === 503) {
+      return [];
+    }
+    if (!response.ok) {
+      throw new Error("Allocations could not be loaded.");
+    }
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    if (err instanceof TypeError) {
+      return [];
+    }
+    throw err;
+  }
+}
+
+export function groupAllocationsByItem(allocations) {
+  const byItem = new Map();
+  for (const allocation of allocations) {
+    const key = String(allocation.item_id);
+    const quantity = Number(allocation.quantity) || 0;
+    const entry = byItem.get(key) || { pulled: 0, shipments: [] };
+    entry.pulled += quantity;
+    entry.shipments.push({
+      shipment_id: allocation.shipment_id,
+      shipment_name: allocation.shipment_name,
+      stage: allocation.stage,
+      quantity,
+    });
+    byItem.set(key, entry);
+  }
+  return byItem;
+}
+
+export function availableQty(onHand, byItem, itemId) {
+  const pulled = byItem.get(String(itemId))?.pulled || 0;
+  return Math.max(0, (Number(onHand) || 0) - pulled);
+}
+
+// pulled = planned/pulling, consolidated = consolidated (both still in the warehouse).
+export function summarizeAllocations(allocations) {
+  return allocations.reduce(
+    (totals, allocation) => {
+      const quantity = Number(allocation.quantity) || 0;
+      if (allocation.stage === "consolidated") {
+        totals.consolidatedUnits += quantity;
+      } else if (allocation.stage === "planned" || allocation.stage === "pulling") {
+        totals.pulledUnits += quantity;
+      }
+      return totals;
+    },
+    { pulledUnits: 0, consolidatedUnits: 0 }
+  );
+}
+
+export function useAllocations() {
+  const [allocations, setAllocations] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const reload = useCallback(async () => {
+    try {
+      setError("");
+      setAllocations(await fetchAllocations());
+    } catch (err) {
+      setError(err.message || "Allocations could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const byItem = useMemo(() => groupAllocationsByItem(allocations), [allocations]);
+  return { allocations, byItem, loading, error, reload };
 }
