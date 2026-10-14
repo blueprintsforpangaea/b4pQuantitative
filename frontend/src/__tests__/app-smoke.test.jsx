@@ -87,3 +87,21 @@ describe("Total Inventory", () => {
     expect(screen.getAllByText("Available").length).toBeGreaterThan(0);
   });
 });
+
+describe("Total Inventory partial pulls", () => {
+  it("shows the pulled and available lines for a partly pulled lot", async () => {
+    fetch.mockImplementation((url) => {
+      if (String(url).endsWith("/items")) return json(ITEMS);
+      if (String(url).endsWith("/kpis")) return json({});
+      if (String(url).endsWith("/allocations")) {
+        return json([{ item_id: "s1", shipment_id: "sh1", shipment_name: "Synthetic run", stage: "pulling", quantity: 4 }]);
+      }
+      return json([]);
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(/Pulled/, { selector: "strong" })).toBeTruthy());
+    expect(screen.getByText(/4 units/)).toBeTruthy();
+    expect(screen.getByText(/Synthetic run/)).toBeTruthy();
+    expect(screen.getByText(/6 units/)).toBeTruthy(); // 10 on hand - 4 pulled
+  });
+});

@@ -2,6 +2,7 @@ import { Fragment, useState } from "react";
 import { durationBucketOrder, expiryTiers, supplyStatusOrder } from "../lib/colors.js";
 import { formatCurrency, formatNumber } from "../lib/format.js";
 import { buildFacetCounts, groupByProduct } from "../lib/inventory.js";
+import { availableQty } from "../lib/shipments.js";
 
 const tierById = Object.fromEntries(expiryTiers.map((tier) => [tier.id, tier]));
 const GROUP_OPTIONS = [
@@ -29,6 +30,7 @@ function StatusTag({ status, count }) {
 }
 
 export default function TotalInventory({
+  allocationsByItem,
   clearInventoryFilters,
   currentShipments,
   inventoryRowsWithShipmentStatus,
@@ -277,12 +279,38 @@ export default function TotalInventory({
     selectedInventoryItems.length > 0 ? ` (${formatNumber(selectedInventoryItems.length)})` : ""
   }`;
 
+  // Partial pulls: part of a lot sits in an active shipment, the rest is still free.
   function renderLotRow(row, nested) {
+    const allocation = allocationsByItem?.get(String(row.id));
+    const pulled = Math.min(allocation?.pulled || 0, row.quantity || 0);
+    const available = availableQty(row.quantity, allocationsByItem || new Map(), row.id);
+    return (
+      <Fragment key={row.id}>
+        {renderLotLine(row, nested, pulled > 0, pulled >= (row.quantity || 0) ? "Pulled" : pulled > 0 ? "Partial" : row.inventoryStatus)}
+        {pulled > 0 ? (
+          <tr className="alloc-row">
+            <td />
+            <td colSpan="6">
+              <div className="alloc-line alloc-pulled">
+                <strong>Pulled</strong> — {formatNumber(pulled)} units →{" "}
+                {allocation.shipments.map((entry) => entry.shipment_name).join(", ")}
+              </div>
+              <div className="alloc-line">
+                <strong>Available</strong> — {formatNumber(available)} units
+              </div>
+            </td>
+          </tr>
+        ) : null}
+      </Fragment>
+    );
+  }
+
+  function renderLotLine(row, nested, hasPull, displayStatus) {
     return (
       <tr
-        key={row.id}
         className={[
           nested ? "lot-row" : "",
+          hasPull ? "has-alloc" : "",
           row.needsReview ? "inventory-row-review" : "",
           row.isPartiallyRequested ? "inventory-row-partial" : "",
         ]
@@ -325,14 +353,14 @@ export default function TotalInventory({
                 {row.manufacturer !== "Unknown" ? ` · ${row.manufacturer}` : ""}
               </div>
               <div className="status-inline">
-                <StatusTag status={row.inventoryStatus} />
+                <StatusTag status={displayStatus} />
                 <ExpiryTag row={row} />
               </div>
             </div>
           </div>
         </td>
         <td>
-          <StatusTag status={row.inventoryStatus} />
+          <StatusTag status={displayStatus} />
         </td>
         <td>
           <div className="expiration-cell">

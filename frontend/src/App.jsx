@@ -4,6 +4,7 @@ import StockAlerts from "./StockAlerts.jsx";
 import Requests from "./Requests.jsx";
 import SyncCell from "./SyncCell.jsx";
 import { API_BASE, NON_INVENTORY_SHIPMENT_STORAGE_KEY, PALLET_MAP_STORAGE_KEY, SHIPMENT_STORAGE_KEY, tabs } from "./lib/config.js";
+import { useAllocations } from "./lib/shipments.js";
 import { averageShipmentDays, parseLocalDate, todayIsoDate } from "./lib/dates.js";
 import { formatNumber } from "./lib/format.js";
 import { buildInventoryRows, inventoryStatusForItem } from "./lib/inventory.js";
@@ -19,6 +20,7 @@ import { InventoryKpiModals, InventoryDetailsModal } from "./components/Inventor
 import ShipmentKpiModals from "./components/ShipmentKpiModals.jsx";
 
 export default function App() {
+  const { allocations, byItem: allocationsByItem } = useAllocations();
   const [activeTab, setActiveTab] = useState("inventory");
   const [activeShipmentSubtab, setActiveShipmentSubtab] = useState("current");
   const [activeShipmentKpiSubtab, setActiveShipmentKpiSubtab] = useState("overview");
@@ -688,6 +690,7 @@ export default function App() {
 
       {!loading && !error && activeTab === "inventory" ? (
 <TotalInventory
+          allocationsByItem={allocationsByItem}
           clearInventoryFilters={clearInventoryFilters}
           currentShipments={currentShipments}
           inventoryRowsWithShipmentStatus={inventoryRowsWithShipmentStatus}

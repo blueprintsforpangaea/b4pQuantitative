@@ -834,6 +834,10 @@ tbody tr.inventory-row-partial:hover {
   background: #1E7A43;
 }
 
+.tag-status.tag-partial {
+  background: #6D28D9;
+}
+
 .tag-status.tag-shipped,
 .tag-status.tag-delivered {
   background: #212121;
@@ -1000,4 +1004,28 @@ tbody tr.inventory-row-partial:hover {
   .entry-count {
     margin-left: 0;
   }
+}
+
+.alloc-row td {
+  padding: 4px 10px 8px;
+  background: var(--bp-surface);
+}
+
+.alloc-row td:nth-child(2) {
+  padding-left: 34px;
+}
+
+.has-alloc td {
+  border-bottom-color: transparent;
+}
+
+.alloc-line {
+  font-size: 0.85rem;
+  padding: 2px 8px;
+}
+
+.alloc-pulled {
+  background: #FEF3C7;
+  border-left: 3px solid #B45309;
+  color: var(--bp-ink);
 }
