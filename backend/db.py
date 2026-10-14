@@ -70,3 +70,153 @@ def fetch_sync_status() -> Dict[str, Any]:
     """The single row of dash_sync_status."""
     with _connect() as conn:
         return conn.execute("SELECT * FROM dash_sync_status").fetchone()
+
+
+# ==============================
+# OPS SHIPMENTS (Blueprints_DB docs/CONTRACT.md, "Ops shipments")
+# ==============================
+CheckViolation = psycopg.errors.CheckViolation  # allocation over what is available -> 409
+ACTIVE_STAGES = ("planned", "pulling", "consolidated")
+PAST_STAGES = ("shipped", "delivered")
+
+
+def _line_json(row: Dict[str, Any]) -> Dict[str, Any]:
+    return dict(row)
+
+
+def _with_lines(conn, heads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ids = [h["id"] for h in heads]
+    by_ship: Dict[str, List[Dict[str, Any]]] = {i: [] for i in ids}
+    if ids:
+        for line in conn.execute("SELECT * FROM dash_shipment_lines WHERE shipment_id = ANY(%s)", (ids,)).fetchall():
+            by_ship[line["shipment_id"]].append(_line_json(line))
+    out = []
+    for head in heads:
+        lines = by_ship[head["id"]]
+        units = sum(l["quantity"] for l in lines) if lines else (head["unit_count"] or 0)
+        value = sum(l["quantity"] * (l["unit_price"] or 0) for l in lines) if lines else (head["value"] or 0)
+        out.append({**head, "lines": lines,
+                    "totals": {"line_count": len(lines), "units": units, "value": round(float(value), 2)}})
+    return out
+
+
+def fetch_shipments(scope: str = "all", shipment_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Shipments (dash_shipments + their dash_shipment_lines). Active first-created last; past newest first."""
+    stages = {"active": ACTIVE_STAGES, "past": PAST_STAGES}.get(scope)
+    with _connect() as conn:
+        if shipment_id is not None:
+            heads = conn.execute("SELECT * FROM dash_shipments WHERE id = %s", (shipment_id,)).fetchall()
+        elif stages:
+            heads = conn.execute("SELECT * FROM dash_shipments WHERE stage = ANY(%s)", (list(stages),)).fetchall()
+        else:
+            heads = conn.execute("SELECT * FROM dash_shipments").fetchall()
+        shipments = _with_lines(conn, heads)
+    if scope == "past":
+        shipments.sort(key=lambda s: (s["ship_date"] or s["created_at"][:10], s["created_at"]), reverse=True)
+    return shipments
+
+
+def fetch_allocations() -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        return conn.execute("SELECT * FROM dash_allocations").fetchall()
+
+
+def create_shipment(header: Dict[str, Any], lines: List[Dict[str, Any]], shipment_id: Optional[str] = None) -> str:
+    """create_shipment(); with shipment_id a retry of the same id returns the existing shipment unchanged."""
+    from psycopg.types.json import Jsonb
+    with _connect() as conn:
+        return conn.execute("SELECT create_shipment(%s, %s, %s) AS id", (shipment_id, Jsonb(header), Jsonb(lines))).fetchone()["id"]
+
+
+def update_shipment(shipment_id: str, patch: Dict[str, Any]) -> bool:
+    from psycopg.types.json import Jsonb
+    with _connect() as conn:
+        return conn.execute("SELECT update_shipment(%s, %s) AS ok", (shipment_id, Jsonb(patch))).fetchone()["ok"]
+
+
+def set_shipment_lines(shipment_id: str, lines: List[Dict[str, Any]]) -> None:
+    from psycopg.types.json import Jsonb
+    with _connect() as conn:
+        conn.execute("SELECT set_shipment_lines(%s, %s)", (shipment_id, Jsonb(lines)))
+
+
+def set_line_flags(shipment_id: str, line_id: int, picked: Optional[bool], consolidated: Optional[bool]) -> bool:
+    """False if the line does not exist or belongs to another shipment."""
+    with _connect() as conn:
+        owner = conn.execute("SELECT shipment_id FROM dash_shipment_lines WHERE id = %s", (str(line_id),)).fetchone()
+        if not owner or owner["shipment_id"] != shipment_id:
+            return False
+        return conn.execute("SELECT set_shipment_line_flags(%s, %s, %s) AS ok", (line_id, picked, consolidated)).fetchone()["ok"]
+
+
+IMPORT_ERRORS = {
+    "invalid_data": "Invalid data in this shipment.",
+    "over_allocation": "Not enough stock available for one of the lines.",
+    "item_not_found": "A line refers to an item that does not exist.",
+    "rejected": "The shipment was rejected as invalid.",
+    "missing_id": "The old shipment has no id.",
+}
+
+
+def import_error(plan: Dict[str, Any], code: str, **extra: Any) -> Dict[str, Any]:
+    """Stable error entry; `reason` repeats `message` for callers written against {id, reason}."""
+    message = IMPORT_ERRORS.get(code, code)
+    return {"index": plan.get("index"), "source": plan.get("source"), "id": plan.get("id"), "code": code,
+            "message": message, "reason": message, **extra}
+
+
+def import_shipments(plans: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Create each planned shipment ({id, index, source, header, lines}) in its own savepoint.
+
+    Returns {created, skipped, errors: [{index, source, id, code, message, reason}]}. A shipment whose id already
+    exists is skipped. Lines naming an item that is not in dash_items are turned into free-text lines first.
+    Driver error text is logged here and never returned.
+    """
+    import json as _json
+    import logging
+    from psycopg.types.json import Jsonb
+    created = skipped = 0
+    errors: List[Dict[str, Any]] = []
+    with _connect() as conn:
+        known = {r["id"] for r in conn.execute("SELECT id FROM dash_items").fetchall()}
+        for plan in plans:
+            sid = plan["id"]
+            try:
+                with conn.transaction():
+                    if conn.execute("SELECT 1 FROM dash_shipment WHERE id = %s", (sid,)).fetchone():
+                        skipped += 1
+                        continue
+                    lines = []
+                    for line in plan["lines"]:
+                        if line.get("item_id") is not None and str(line["item_id"]).strip() in known:
+                            lines.append({**line, "item_id": str(line["item_id"]).strip()})
+                        else:
+                            lines.append({k: v for k, v in line.items() if k != "item_id"})
+                    conn.execute("SELECT create_shipment(%s, %s, %s, true)", (sid, Jsonb(plan["header"]), Jsonb(lines)))
+                    created += 1
+            except psycopg.errors.OperationalError:
+                raise
+            except psycopg.Error as exc:
+                logging.getLogger("uvicorn.error").warning("shipment import %r rejected: %s", sid, exc)
+                extra: Dict[str, Any] = {}
+                if isinstance(exc, psycopg.errors.CheckViolation):
+                    code = "over_allocation"
+                    try:
+                        extra = _json.loads(exc.diag.message_detail or "{}")
+                    except ValueError:
+                        pass
+                elif isinstance(exc, psycopg.errors.NoDataFound):
+                    code = "item_not_found"
+                elif isinstance(exc, psycopg.errors.DataError):
+                    code = "invalid_data"
+                elif isinstance(exc, psycopg.errors.RaiseException):
+                    code = "rejected"
+                else:
+                    raise
+                errors.append(import_error(plan, code, **extra))
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def shipment_exists(shipment_id: str) -> bool:
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM dash_shipment WHERE id = %s", (shipment_id,)).fetchone() is not None

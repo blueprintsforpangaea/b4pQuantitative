@@ -21,11 +21,12 @@ except ImportError:  # pragma: no cover - optional until credentials are configu
     Credentials = None
 
 try:
-    from . import db
+    from . import db, shipments
     from .alerts import build_alerts
     from .exports import add_stock_warnings, expiring_csv, packing_list_csv
 except ImportError:  # run as `uvicorn app:app` from inside backend/
     import db
+    import shipments
     from alerts import build_alerts
     from exports import add_stock_warnings, expiring_csv, packing_list_csv
 
@@ -40,7 +41,7 @@ app.add_middleware(
         for o in os.getenv("ALLOWED_ORIGINS", "https://b4p-quantitative.vercel.app,http://localhost:5173").split(",")
         if o.strip()
     ],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "PUT"],
     allow_headers=["Content-Type", "X-Admin-Token"],
 )
 
@@ -726,3 +727,9 @@ def update_request_status(request_id: str, payload: RequestStatusUpdate):
     if not found:
         raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
     return {"request_id": request_id, "status": status}
+
+
+# ==============================
+# OPS SHIPMENTS (database mode only)
+# ==============================
+shipments.install(app, require_admin, clear_items_cache)
