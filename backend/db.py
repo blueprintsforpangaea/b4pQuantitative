@@ -175,7 +175,7 @@ def import_shipments(plans: List[Dict[str, Any]]) -> Dict[str, Any]:
                     conn.execute("SELECT create_shipment(%s, %s, %s, true)", (sid, Jsonb(plan["header"]), Jsonb(lines)))
                     created += 1
             except psycopg.errors.DataError as exc:
-                errors.append({"id": sid, "reason": exc.diag.message_primary or "invalid data"})
+                errors.append({"id": sid, "reason": "Invalid data in this shipment."})  # driver text is not shown
             except (psycopg.errors.RaiseException, psycopg.errors.CheckViolation, psycopg.errors.NoDataFound) as exc:
                 errors.append({"id": sid, "reason": exc.diag.message_primary or "rejected"})
     return {"created": created, "skipped": skipped, "errors": errors}

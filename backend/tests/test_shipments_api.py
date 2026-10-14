@@ -188,3 +188,20 @@ def test_cors_allows_patch_and_put():
     r = c.options("/shipments/x", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "PATCH",
                                            "Access-Control-Request-Headers": "x-admin-token,content-type"})
     assert r.status_code == 200 and "PATCH" in r.headers["access-control-allow-methods"] and "PUT" in r.headers["access-control-allow-methods"]
+
+
+def test_stage_steps_back_one_at_a_time(client):
+    s = make(client, [])
+    sid = s["id"]
+    assert client.patch(f"/shipments/{sid}", json={"stage": "consolidated"}).status_code == 200
+    assert client.patch(f"/shipments/{sid}", json={"stage": "planned"}).status_code == 409
+    assert client.patch(f"/shipments/{sid}", json={"stage": "pulling"}).json()["stage"] == "pulling"
+    assert client.patch(f"/shipments/{sid}", json={"stage": "planned"}).json()["stage"] == "planned"
+
+
+def test_import_reason_never_contains_driver_text(client):
+    r = client.post("/shipments/import", json={"shipments": [{"id": "s1", "recipientName": "A", "createdAt": "2026-03-02", "shipmentDate": "not-a-date",
+                                                              "isCompleted": True, "items": []}]})
+    assert r.status_code == 200
+    for e in r.json()["errors"]:
+        assert "LINE" not in e["reason"] and "psycopg" not in e["reason"]
