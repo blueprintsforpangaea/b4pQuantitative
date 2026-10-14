@@ -202,6 +202,7 @@ export function toLegacyShipments(apiShipments) {
       shipmentType: normalizeShipmentType(shipment.shipment_type),
       shippedAt: shipment.ship_date || (shipment.created_at || "").slice(0, 10),
       valuation: Number(shipment.value) || 0,
+      unitCount: Number(shipment.unit_count) || 0,
       createdAt: (shipment.created_at || "").slice(0, 10),
     }));
   return { shipments: legacy, nonInventoryShipments: nonInventory };

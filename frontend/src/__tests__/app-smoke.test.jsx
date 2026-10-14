@@ -167,3 +167,43 @@ describe("Add selected to shipment", () => {
     expect(within(dialog).getByText(/Synthetic supply s1/)).toBeTruthy();
   });
 });
+
+describe("Shipments feed the dashboard without hiding stock", () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const shipped = (over) => ({ id: "SHP-1", name: "Synthetic clinic", recipient: "Synthetic clinic", shipment_type: "Local", shipping_method: "Car", blueprints_contact: "Alex Example",
+    stage: "shipped", ship_date: today, delivered_date: null, request_ids: [], kind: "inventory", unit_count: null, value: null, notes: "",
+    created_at: `${today}T10:00:00Z`, updated_at: `${today}T10:00:00Z`, lines: [], totals: { line_count: 0, units: 0, value: 0 }, ...over });
+
+  function serve(shipments) {
+    vi.stubGlobal("fetch", vi.fn((url) => {
+      const path = String(url);
+      if (path.endsWith("/items")) return json(ITEMS);
+      if (path.endsWith("/kpis")) return json({});
+      if (path.includes("/shipments")) return json(shipments);
+      return json([]);
+    }));
+  }
+
+  it("keeps a partly shipped item in inventory with its remaining quantity", async () => {
+    serve([shipped({ lines: [{ id: "1", item_id: "s1", quantity: 3, picked: true, consolidated: true, name: "Synthetic supply s1", unit_price: 2 }], totals: { line_count: 1, units: 3, value: 6 } })]);
+    render(<App />);
+    await waitFor(() => expect(screen.queryByText(/Loading dashboard data/)).toBeNull());
+    await waitFor(() => expect(globalThis.fetch.mock.calls.some(([url]) => String(url).includes("/shipments"))).toBe(true));
+    expect(screen.getByText("Synthetic supply s1")).toBeTruthy();
+    expect(screen.getByText("Synthetic supply s2")).toBeTruthy();
+  });
+
+  it("counts a non-inventory shipment's unit_count in Units shipped", async () => {
+    serve([shipped({ id: "SHP-NI-1", kind: "non_inventory", name: "Donated chairs", unit_count: 4, value: 80, totals: { line_count: 0, units: 4, value: 80 } })]);
+    render(<App />);
+    await waitFor(() => expect(screen.queryByText(/Loading dashboard data/)).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Shipment KPIs" }));
+    const month = await screen.findByText("This month vs last month");
+    const rows = within(month.closest(".shipment-compare-block")).getAllByRole("row");
+    const units = rows.find((row) => within(row).queryByText("Units shipped"));
+    await waitFor(() => expect(within(units).getAllByRole("cell")[0].textContent).toBe("4"));
+    const value = rows.find((row) => within(row).queryByText("Value shipped"));
+    expect(within(value).getAllByRole("cell")[0].textContent).toBe("$80.00");
+    expect(within(value).getAllByRole("cell")[1].textContent).toBe("$0.00");
+  });
+});

@@ -1,4 +1,5 @@
-import { formatCurrency, formatNumber } from "../lib/format.js";
+import { formatNumber } from "../lib/format.js";
+import { formatMoney } from "../lib/shipmentsLogic.js";
 import { comparePeriods, periodLabels, toIsoDate } from "../lib/shipmentComparisons.js";
 
 const STATUS_LABELS = {
@@ -23,7 +24,8 @@ function ComparisonBlock({ title, granularity, entries, todayIso }) {
   const rows = [
     { label: "Shipments", data: comparison.shipments, format: formatNumber },
     { label: "Units shipped", data: comparison.units, format: formatNumber },
-    { label: "Value shipped", data: comparison.value, format: formatCurrency },
+    // $0.00 when nothing shipped; "Price unknown" only when shipments exist but carry no value.
+    { label: "Value shipped", data: comparison.value, format: (value, shipmentCount) => (value === 0 && shipmentCount > 0 ? "Price unknown" : formatMoney(value)) },
   ];
 
   return (
@@ -45,10 +47,10 @@ function ComparisonBlock({ title, granularity, entries, todayIso }) {
           {rows.map(({ label, data, format }) => (
             <tr key={label}>
               <th scope="row">{label}</th>
-              <td className="num">{format(data.current)}</td>
-              <td className="num">{format(data.prior)}</td>
+              <td className="num">{format(data.current, comparison.shipments.current)}</td>
+              <td className="num">{format(data.prior, comparison.shipments.prior)}</td>
               <td className="num">{formatChange(data.pct)}</td>
-              <td className="num">{format(data.priorFull)}</td>
+              <td className="num">{format(data.priorFull, comparison.shipments.priorFull)}</td>
               <td>
                 <span className={`compare-tag compare-tag-${data.status}`}>
                   {STATUS_LABELS[data.status]}
