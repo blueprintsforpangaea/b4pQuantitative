@@ -66,7 +66,6 @@ export default function TotalInventory({
   setSelectedPallets,
   setSelectedWorkflowStatuses,
   setValuationRange,
-  showFloatingInventoryAction,
   valuationRange,
 }) {
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
@@ -562,25 +561,6 @@ export default function TotalInventory({
           {formatNumber(productCount)} {productCount === 1 ? "product" : "products"} · {formatNumber(filteredInventoryRows.length)} {filteredInventoryRows.length === 1 ? "line" : "lines"}
         </span>
       </div>
-
-      {showFloatingInventoryAction ? (
-        <div className="floating-inventory-actions">
-          {filterButton}
-          {hasActiveInventoryFilters ? (
-            <button type="button" className="secondary-button" onClick={clearInventoryFilters}>
-              Clear all
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="primary-button"
-            disabled={selectedInventoryItems.length === 0}
-            onClick={() => openShipmentModal(selectedInventoryItems)}
-          >
-            {addToShipmentLabel}
-          </button>
-        </div>
-      ) : null}
 
       <div className="inventory-layout">
         {isInventoryFiltersOpen ? (

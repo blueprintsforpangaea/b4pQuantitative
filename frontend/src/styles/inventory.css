@@ -371,33 +371,6 @@
   cursor: not-allowed;
 }
 
-.floating-inventory-actions {
-  position: fixed;
-  top: 20px;
-  right: 24px;
-  z-index: 900;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid #e2e2e2;
-  border-radius: 16px;
-  background: #ffffff;
-  box-shadow: 0 14px 32px rgba(13, 59, 111, 0.24);
-  animation: floating-action-enter 160ms ease-out;
-}
-
-@keyframes floating-action-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .inventory-filter-button {
   display: inline-flex;
   align-items: center;
@@ -597,12 +570,18 @@ tbody tr.inventory-row-partial td:first-child {
 
 /* ---- Total Inventory: grouped, dense list ---- */
 .inventory-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: 0 -24px 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--bp-line);
+  background: var(--bp-surface);
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 12px;
 }
 
 .inventory-search {
@@ -955,5 +934,15 @@ tbody tr.inventory-row-partial td:first-child {
 
   .group-by .segment {
     padding: 5px 8px;
+  }
+}
+
+/* On phones the toolbar is two rows tall, so it scrolls with the page instead of sticking. */
+@media (max-width: 720px) {
+  .inventory-toolbar {
+    position: static;
+    margin: 0 0 12px;
+    padding: 0;
+    border-bottom: 0;
   }
 }

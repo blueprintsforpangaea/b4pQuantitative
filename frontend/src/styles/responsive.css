@@ -19,7 +19,7 @@
   .panel,
   .summary-card {
     padding: 18px;
-    border-radius: 0 16px 16px 16px;
+    border-radius: 0 4px 4px 4px;
   }
 
   .panel-header {
@@ -40,13 +40,6 @@
     align-items: stretch;
   }
 
-  .floating-inventory-actions {
-    top: 12px;
-    right: 12px;
-    max-width: calc(100vw - 24px);
-    flex-direction: column;
-    align-items: stretch;
-  }
 
   .kpi-analytics-grid {
     grid-template-columns: 1fr;
