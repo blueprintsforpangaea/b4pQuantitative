@@ -192,6 +192,8 @@ def build_router(require_admin, require_db, clear_items_cache) -> APIRouter:
     @router.post("/shipments", dependencies=admin)
     def create_shipment(payload: ShipmentCreate):
         header = payload.model_dump(exclude_unset=True, exclude={"lines", "id"})
+        if header.get("kind") == "non_inventory" and not header.get("stage"):
+            header["stage"] = "shipped"   # a non-inventory shipment is recorded after the fact
         try:
             if payload.id and db.shipment_exists(payload.id):
                 return shipment_response(payload.id, 200)

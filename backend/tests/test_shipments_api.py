@@ -77,7 +77,7 @@ def test_writes_need_the_admin_token(client):
         assert getattr(anon, method)(path, json=body).status_code == 401, path
         assert getattr(anon, method)(path, json=body, headers={"X-Admin-Token": "bad"}).status_code == 401, path
     assert anon.get("/shipments").status_code == 401
-    assert anon.get("/allocations").status_code == 200   # public like /items (reduced, see test_allocations_hide_shipment_names)
+    assert anon.get("/allocations").status_code == 200   # public like /items (reduced, see test_create_get_scopes_and_totals)
 
 
 def test_create_get_scopes_and_totals(client):
@@ -210,13 +210,6 @@ def test_stage_steps_back_one_at_a_time(client):
     assert client.patch(f"/shipments/{sid}", json={"stage": "planned"}).json()["stage"] == "planned"
 
 
-def test_import_reason_never_contains_driver_text(client):
-    r = client.post("/shipments/import", json={"shipments": [{"id": "s1", "recipientName": "A", "createdAt": "2026-03-02", "shipmentDate": "not-a-date",
-                                                              "isCompleted": True, "items": []}]})
-    assert r.status_code == 200
-    for e in r.json()["errors"]:
-        assert "LINE" not in e["reason"] and "psycopg" not in e["reason"]
-
 
 def test_non_inventory_shipment_created_directly_and_retry_safe(client):
     it = ids(client)
@@ -234,8 +227,19 @@ def test_non_inventory_shipment_created_directly_and_retry_safe(client):
 
 
 def test_import_error_text_is_stable_and_has_no_driver_text(client):
-    r = client.post("/shipments/import", json={"shipments": [{"id": "s1", "recipientName": "A", "isCompleted": True,
-                                                              "shipmentDate": "2026-13-45", "items": []}]})
-    out = r.json()
+    bad_date = {"id": "s1", "recipientName": "A", "isCompleted": True, "shipmentDate": "2026-13-45", "items": []}
+    nul = {"id": "s2", "recipientName": "bad \u0000 name", "items": []}      # PostgreSQL DataError (NUL in text)
+    out = client.post("/shipments/import", json={"shipments": [bad_date, nul]}).json()
+    assert out["created"] == 0 and len(out["errors"]) == 2
+    codes = {e["id"]: e for e in out["errors"]}
+    assert codes["s1"]["code"] == "rejected" and codes["s1"]["message"] == "The shipment was rejected as invalid."
+    assert codes["s2"]["code"] == "invalid_data" and codes["s2"]["message"] == "Invalid data in this shipment."
     for e in out["errors"]:
-        assert set(e) >= {"index", "code", "message"} and "LINE" not in e["message"] and "date/time" not in e["message"]
+        assert e["reason"] == e["message"]
+        low = e["message"].lower() + str(e).lower()
+        assert not any(w in low for w in ("line ", "pl/pgsql", "psycopg", "sqlstate", "date/time", "unicode", "\\u0000"))
+
+
+def test_non_inventory_stage_defaults_to_shipped(client):
+    r = client.post("/shipments", json={"id": "ni-1", "name": "Walk-in", "kind": "non_inventory", "ship_date": "2026-02-01", "value": 10})
+    assert r.status_code == 201 and r.json()["stage"] == "shipped"
