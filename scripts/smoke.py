@@ -3,7 +3,7 @@
 
     DATABASE_URL=postgresql:///b4p_v2 .venv/bin/python scripts/smoke.py
 
-Read-only: it never changes a quantity or a status (the status check uses an id that does not exist).
+Read-only: it never changes a quantity, a status or a shipment (the write checks use ids that do not exist).
 Refuses a DATABASE_URL that points at a remote host.
 """
 import json
@@ -117,6 +117,25 @@ def main():
         expect("POST status without a token is 401", call(base, "/requests/REQ-does-not-exist/status", "POST", body={"status": "Approved"})[0] == 401)
         expect("POST status for an unknown request is 404", call(base, "/requests/REQ-does-not-exist/status", "POST", TOKEN, {"status": "Approved"})[0] == 404)
         expect("POST status with an invalid status is 400", call(base, "/requests/REQ-does-not-exist/status", "POST", TOKEN, {"status": "bogus"})[0] == 400)
+        # ops shipments (read-only: nothing is created; needs the Blueprints_DB migration on this database)
+        expect("GET /shipments without a token is 401", call(base, "/shipments")[0] == 401)
+        s, h, b = call(base, "/shipments?scope=all", token=TOKEN)
+        shipments = json.loads(b) if s == 200 else []
+        expect("GET /shipments with the token", s == 200 and isinstance(shipments, list)
+               and all({"id", "stage", "lines", "totals"} <= set(x) for x in shipments), f"{s} {b[:120]}")
+        expect("GET /shipments?scope=active", call(base, "/shipments?scope=active", token=TOKEN)[0] == 200)
+        expect("GET /shipments?scope=past", call(base, "/shipments?scope=past", token=TOKEN)[0] == 200)
+        expect("GET /shipments?scope=bogus is 422", call(base, "/shipments?scope=bogus", token=TOKEN)[0] == 422)
+        s, h, b = call(base, "/allocations")
+        expect("GET /allocations", s == 200 and isinstance(json.loads(b), list), f"{s} {b[:120]}")
+        expect("GET /shipments/<unknown> is 404", call(base, "/shipments/SHP-does-not-exist", token=TOKEN)[0] == 404)
+        expect("POST /shipments without a token is 401", call(base, "/shipments", "POST", body={"name": "x"})[0] == 401)
+        expect("PATCH /shipments/<unknown> is 404", call(base, "/shipments/SHP-does-not-exist", "PATCH", TOKEN, {"notes": "x"})[0] == 404)
+        expect("PATCH /shipments with an unknown field is 400", call(base, "/shipments/SHP-does-not-exist", "PATCH", TOKEN, {"bogus": 1})[0] == 400)
+        expect("PUT lines of an unknown shipment is 404", call(base, "/shipments/SHP-does-not-exist/lines", "PUT", TOKEN, [])[0] == 404)
+        expect("POST /shipments with an invalid body is 400/422", call(base, "/shipments", "POST", TOKEN, {"name": ""})[0] in (400, 422))
+        expect("POST /shipments/import with nothing creates nothing",
+               json.loads(call(base, "/shipments/import", "POST", TOKEN, {"shipments": [], "non_inventory": []})[2]) == {"created": 0, "skipped": 0, "errors": []})
     finally:
         server.terminate()
         try:
