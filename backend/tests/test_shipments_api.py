@@ -77,7 +77,7 @@ def test_writes_need_the_admin_token(client):
         assert getattr(anon, method)(path, json=body).status_code == 401, path
         assert getattr(anon, method)(path, json=body, headers={"X-Admin-Token": "bad"}).status_code == 401, path
     assert anon.get("/shipments").status_code == 401
-    assert anon.get("/allocations").status_code == 200   # public like /items (reduced, see test_allocations_hide_shipment_names)
+    assert anon.get("/allocations").status_code == 200   # public like /items (reduced, see test_create_get_scopes_and_totals)
 
 
 def test_create_get_scopes_and_totals(client):
