@@ -140,3 +140,19 @@ describe("Inventory KPIs", () => {
     expect(screen.getByRole("combobox").value).toBe("2");
   });
 });
+
+describe("Partial pulls without a shipment name", () => {
+  it("drops the arrow when /allocations has no shipment_name", async () => {
+    fetch.mockImplementation((url) => {
+      if (String(url).endsWith("/items")) return json(ITEMS);
+      if (String(url).endsWith("/kpis")) return json({});
+      if (String(url).endsWith("/allocations")) {
+        return json([{ item_id: "s1", shipment_id: "sh1", stage: "pulling", quantity: 4 }]);
+      }
+      return json([]);
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getByText(/Pulled/, { selector: "strong" })).toBeTruthy());
+    expect(screen.getByText(/4 units/).textContent).not.toContain("→");
+  });
+});

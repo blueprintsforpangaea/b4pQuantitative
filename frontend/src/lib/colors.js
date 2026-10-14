@@ -117,12 +117,13 @@ export const boxCategoryPalette = [
 ];
 
 // Expiry tiers (Total Inventory legend, Inventory KPIs breakdown). Solid fills
-// that carry white text at AA contrast; red expired, orange <=30d, amber 31-90d,
-// green 90+, gray no expiry date.
+// with AA text (white, or ink on the light orange and amber). Red expired, orange <=30d,
+// amber 31-90d, green 90+, gray no expiry date. Chromatic slots pass the dataviz CVD check
+// (worst adjacent deltaE 12.3); gray is the reserved "no data" state.
 export const expiryTiers = [
-  { id: "expired", label: "Expired", color: "#B3261E" },
-  { id: "d30", label: "≤30 days", color: "#C2410C" },
-  { id: "d90", label: "31–90 days", color: "#B45309" },
-  { id: "ok", label: ">90 days", color: "#15803D" },
-  { id: "none", label: "No expiry date", color: "#6B7280" },
+  { id: "expired", label: "Expired", color: "#9B1C1C", text: "#ffffff" },
+  { id: "d30", label: "\u226430 days", color: "#EA6A0A", text: "#212121" },
+  { id: "d90", label: "31\u201390 days", color: "#EAB308", text: "#212121" },
+  { id: "ok", label: ">90 days", color: "#15803D", text: "#ffffff" },
+  { id: "none", label: "No expiry date", color: "#6B7280", text: "#ffffff" },
 ];

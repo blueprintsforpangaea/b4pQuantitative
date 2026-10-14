@@ -142,7 +142,7 @@ export default function InventoryKpis({
             <select value={pallet} onChange={(event) => setPickedPallet(event.target.value)} disabled={pallets.length === 0}>
               {pallets.map((id) => (
                 <option key={id} value={id}>
-                  Pallet {id}
+                  Pallet {id}{id === latestPallet(rows) ? " (latest)" : ""}
                 </option>
               ))}
             </select>

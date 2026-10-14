@@ -14,19 +14,23 @@ const GROUP_OPTIONS = [
 function ExpiryTag({ row }) {
   const tier = tierById[row.expiryTier];
   return (
-    <span className="tag" style={{ background: tier.color }}>
+    <span className="tag" style={{ background: tier.color, color: tier.text }}>
       {row.expiryTier === "none" ? tier.label : row.expirationStatus.label}
     </span>
   );
 }
 
-function StatusTag({ status, count }) {
-  return (
-    <span className={`tag tag-status tag-${status.toLowerCase()}`}>
-      {status}
-      {count ? ` ${count}` : ""}
-    </span>
-  );
+// /allocations omits shipment_name for callers without the admin token; then the line is just the count.
+function shipmentNames(allocation) {
+  return [...new Set(allocation.shipments.map((entry) => entry.shipment_name).filter(Boolean))].join(", ");
+}
+
+function StatusTag({ status }) {
+  return <span className={`tag tag-status tag-${status.toLowerCase()}`}>{status}</span>;
+}
+
+function PulledTag({ units }) {
+  return units > 0 ? <span className="tag tag-status tag-partial">{formatNumber(units)} pulled</span> : null;
 }
 
 export default function TotalInventory({
@@ -73,7 +77,7 @@ export default function TotalInventory({
   valuationRange,
 }) {
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
-  const [groupBy, setGroupBy] = useState("none");
+  const [groupBy, setGroupBy] = useState("category");
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const expirationOptions = buildFacetCounts(inventoryRowsWithStatus, "expirationFilter", [
@@ -286,14 +290,14 @@ export default function TotalInventory({
     const available = availableQty(row.quantity, allocationsByItem || new Map(), row.id);
     return (
       <Fragment key={row.id}>
-        {renderLotLine(row, nested, pulled > 0, pulled >= (row.quantity || 0) ? "Pulled" : pulled > 0 ? "Partial" : row.inventoryStatus)}
+        {renderLotLine(row, nested, pulled > 0, pulled >= (row.quantity || 0) ? "Pulled" : row.inventoryStatus, pulled < (row.quantity || 0) ? pulled : 0)}
         {pulled > 0 ? (
           <tr className="alloc-row">
             <td />
             <td colSpan="6">
               <div className="alloc-line alloc-pulled">
-                <strong>Pulled</strong> — {formatNumber(pulled)} units →{" "}
-                {allocation.shipments.map((entry) => entry.shipment_name).join(", ")}
+                <strong>Pulled</strong> — {formatNumber(pulled)} units
+                {shipmentNames(allocation) ? ` → ${shipmentNames(allocation)}` : ""}
               </div>
               <div className="alloc-line">
                 <strong>Available</strong> — {formatNumber(available)} units
@@ -305,7 +309,7 @@ export default function TotalInventory({
     );
   }
 
-  function renderLotLine(row, nested, hasPull, displayStatus) {
+  function renderLotLine(row, nested, hasPull, displayStatus, partialPulled) {
     return (
       <tr
         className={[
@@ -354,13 +358,17 @@ export default function TotalInventory({
               </div>
               <div className="status-inline">
                 <StatusTag status={displayStatus} />
+                <PulledTag units={partialPulled} />
                 <ExpiryTag row={row} />
               </div>
             </div>
           </div>
         </td>
         <td>
-          <StatusTag status={displayStatus} />
+          <span className="tag-stack">
+            <StatusTag status={displayStatus} />
+            <PulledTag units={partialPulled} />
+          </span>
         </td>
         <td>
           <div className="expiration-cell">
@@ -384,10 +392,15 @@ export default function TotalInventory({
     const isOpen = expandedKeys.has(key);
     const selectableIds = group.rows.filter((row) => row.inventoryStatus === "Available").map((row) => row.id);
     const selectedCount = selectableIds.filter((id) => selectedInventoryIds.includes(id)).length;
-    const statusCounts = group.rows.reduce((counts, row) => {
-      counts[row.inventoryStatus] = (counts[row.inventoryStatus] || 0) + 1;
-      return counts;
-    }, {});
+    const statuses = [...new Set(group.rows.map((row) => row.inventoryStatus))];
+    const pulledUnits = group.rows.reduce(
+      (total, row) =>
+        total + Math.min(allocationsByItem?.get(String(row.id))?.pulled || 0, row.quantity || 0),
+      0
+    );
+    const prices = group.rows.map((row) => row.unitPrice);
+    const lowPrice = Math.min(...prices);
+    const highPrice = Math.max(...prices);
     const soonest = group.rows.find((row) => row.expirationDaysLeft === group.soonestDaysLeft) || group.rows[0];
 
     return (
@@ -423,9 +436,10 @@ export default function TotalInventory({
                   {group.rows.length} lots/variants · {group.category}
                 </span>
                 <span className="status-inline tag-stack">
-                  {Object.entries(statusCounts).map(([status, count]) => (
-                    <StatusTag key={status} status={status} count={count} />
+                  {statuses.map((status) => (
+                    <StatusTag key={status} status={status} />
                   ))}
+                  <PulledTag units={pulledUnits} />
                   <ExpiryTag row={soonest} />
                 </span>
               </span>
@@ -433,9 +447,10 @@ export default function TotalInventory({
           </td>
           <td>
             <span className="tag-stack">
-              {Object.entries(statusCounts).map(([status, count]) => (
-                <StatusTag key={status} status={status} count={count} />
+              {statuses.map((status) => (
+                <StatusTag key={status} status={status} />
               ))}
+              <PulledTag units={pulledUnits} />
             </span>
           </td>
           <td>
@@ -445,7 +460,11 @@ export default function TotalInventory({
             </div>
           </td>
           <td className="num">{formatNumber(group.totalQuantity)}</td>
-          <td className="num">—</td>
+          <td className="num">
+            {lowPrice === highPrice
+              ? formatCurrency(lowPrice)
+              : `${formatCurrency(lowPrice)}\u2013${formatCurrency(highPrice)}`}
+          </td>
           <td className="num">{formatCurrency(group.totalValue)}</td>
         </tr>
         {isOpen ? group.rows.map((row) => renderLotRow(row, true)) : null}
@@ -553,7 +572,7 @@ export default function TotalInventory({
           ))}
         </div>
         <span className="entry-count">
-          {formatNumber(productCount)} products · {formatNumber(filteredInventoryRows.length)} lines
+          {formatNumber(productCount)} {productCount === 1 ? "product" : "products"} · {formatNumber(filteredInventoryRows.length)} {filteredInventoryRows.length === 1 ? "line" : "lines"}
         </span>
       </div>
 
@@ -727,7 +746,7 @@ export default function TotalInventory({
                             ) : null}
                             <strong>{section.label}</strong>
                             <span className="section-count">
-                              {formatNumber(groups.length)} products ·{" "}
+                              {formatNumber(groups.length)} {groups.length === 1 ? "product" : "products"} ·{" "}
                               {formatNumber(section.rows.reduce((total, row) => total + (row.quantity || 0), 0))} units
                             </span>
                           </td>

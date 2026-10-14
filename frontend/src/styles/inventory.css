@@ -84,8 +84,7 @@
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(13, 35, 59, 0.36);
-  backdrop-filter: blur(2px);
+  background: rgba(13, 35, 59, 0.5);
 }
 
 .filters-header {
@@ -290,43 +289,6 @@
   outline-offset: 2px;
 }
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 86px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 0.82rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.status-pill.inventory {
-  background: #f4f4f4;
-  color: #8f8f8f;
-}
-
-.status-pill.pulled {
-  background: var(--brand-dark);
-  color: #ffffff;
-}
-
-.status-pill.consolidated {
-  background: #1E7A43;
-  color: #ffffff;
-}
-
-.status-pill.shipped {
-  background: #212121;
-  color: #ffffff;
-}
-
-.status-pill.delivered {
-  background: #212121;
-  color: #ffffff;
-}
-
 .inventory-results {
   min-width: 0;
 }
@@ -351,45 +313,41 @@
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 0.84rem;
-  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.8rem;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .expiration-pill.expired {
-  background: #5E140C;
+  background: #9B1C1C;
   color: #ffffff;
 }
 
 .expiration-pill.urgent {
-  background: #A32B10;
-  color: #ffffff;
+  background: #EA6A0A;
+  color: #212121;
 }
 
 .expiration-pill.warning {
-  background: #FCEDE2;
-  color: #8A3D14;
-  border: 1px solid #F3D3C0;
+  background: #EAB308;
+  color: #212121;
 }
 
 .expiration-pill.caution {
-  background: #FDF3E3;
-  color: #6B4E00;
-  border: 1px solid #F0DFB8;
+  background: #8A6A00;
+  color: #ffffff;
 }
 
 .expiration-pill.healthy {
-  background: #E7F3EB;
-  color: #14612F;
-  border: 1px solid #C3E0CE;
+  background: #15803D;
+  color: #ffffff;
 }
 
 .expiration-pill.none {
-  background: #F0F0F0;
-  color: #5E5E5E;
-  border: 1px solid #E2E2E2;
+  background: #6B7280;
+  color: #ffffff;
 }
 
 .inventory-actions {
@@ -424,9 +382,8 @@
   padding: 10px;
   border: 1px solid #e2e2e2;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.96);
+  background: #ffffff;
   box-shadow: 0 14px 32px rgba(13, 59, 111, 0.24);
-  backdrop-filter: blur(8px);
   animation: floating-action-enter 160ms ease-out;
 }
 
@@ -607,28 +564,30 @@ th {
 }
 
 tbody tr:hover {
-  background: rgba(244, 244, 244, 0.82);
+  background: #f4f4f4;
 }
 
-tbody tr.inventory-row-review {
-  background: rgba(255, 241, 238, 0.9);
-}
-
+tbody tr.inventory-row-review,
 tbody tr.inventory-row-review:hover {
-  background: rgba(255, 229, 222, 0.96);
+  background: #fdecea;
 }
 
-tbody tr.inventory-row-partial {
-  background: rgba(255, 246, 222, 0.92);
+tbody tr.inventory-row-review td:first-child {
+  box-shadow: inset 3px 0 0 #9b1c1c;
 }
 
+tbody tr.inventory-row-partial,
 tbody tr.inventory-row-partial:hover {
-  background: rgba(255, 241, 205, 0.96);
+  background: #fef3c7;
+}
+
+tbody tr.inventory-row-partial td:first-child {
+  box-shadow: inset 3px 0 0 #b45309;
 }
 
 .empty-state-cell {
   text-align: center;
-  color: #8f8f8f;
+  color: #6b6b6b;
   padding: 24px 16px;
 }
 
@@ -738,19 +697,6 @@ tbody tr.inventory-row-partial:hover {
   height: 10px;
   border-radius: 2px;
   flex: none;
-}
-
-.tag {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  padding: 2px 8px;
-  border-radius: 3px;
-  color: #ffffff;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
 }
 
 .tag-status.tag-available {
@@ -959,4 +905,55 @@ tbody tr.inventory-row-partial:hover {
   background: #FEF3C7;
   border-left: 3px solid #B45309;
   color: var(--bp-ink);
+}
+
+.chip,
+.legend-item,
+.segment {
+  min-height: 32px;
+}
+
+@media (max-width: 600px) {
+  .inventory-actions {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .inventory-actions .secondary-button,
+  .inventory-actions .primary-button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .category-chips,
+  .expiry-legend {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
+  }
+
+  .category-chips > *,
+  .expiry-legend > * {
+    flex: none;
+  }
+
+  .inventory-subbar {
+    gap: 8px;
+  }
+
+  .expiry-legend {
+    width: 100%;
+  }
+
+  .group-by {
+    flex-wrap: nowrap;
+  }
+
+  .group-by .segment {
+    padding: 5px 8px;
+  }
 }
