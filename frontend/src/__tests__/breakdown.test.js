@@ -38,9 +38,15 @@ describe("buildBreakdown", () => {
     expect(segments[0].label).toBe("Cat 00");
   });
 
-  it("breaks down by workflow status and time in warehouse", () => {
-    const mixed = [row("a", { supplyWorkflowStatus: "Pulled" }), row("b"), row("c", { durationFilter: "31-90 days" })];
-    expect(buildBreakdown(mixed, "workflow").segments.map((s) => s.id)).toEqual(["Inventory", "Pulled"]);
+  it("breaks down workflow status by units from allocations, and time in warehouse", () => {
+    const mixed = [
+      row("a", { quantity: 10, availableUnits: 6, pulledUnits: 4, consolidatedUnits: 0, unitPrice: 2 }),
+      row("b", { quantity: 5, availableUnits: 0, pulledUnits: 0, consolidatedUnits: 5, unitPrice: 1 }),
+      row("c", { durationFilter: "31-90 days" }),
+    ];
+    const units = buildBreakdown(mixed, "workflow", "units");
+    expect(units.segments.map((s) => [s.id, s.value])).toEqual([["Inventory", 16], ["Pulled", 4], ["Consolidated", 5]]);
+    expect(buildBreakdown(mixed, "workflow", "value").segments.map((s) => s.value)).toEqual([12, 8, 5]);
     expect(buildBreakdown(mixed, "duration").segments.map((s) => s.id)).toEqual(["0-30 days", "31-90 days"]);
   });
 

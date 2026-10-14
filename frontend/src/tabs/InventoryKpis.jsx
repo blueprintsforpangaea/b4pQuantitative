@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Breakdown, { BreakdownControls } from "../components/Breakdown.jsx";
+import { applyAllocations } from "../lib/inventory.js";
 import { buildBreakdown, inventoryTiles, latestPallet, palletIds } from "../lib/breakdown.js";
 import { formatCurrency, formatNumber } from "../lib/format.js";
 import { summarizeAllocations } from "../lib/shipments.js";
@@ -8,7 +9,7 @@ export default function InventoryKpis({
   allocations,
   allocationsByItem,
   clearInventoryFilters,
-  inventoryRowsWithShipmentStatus,
+  inventoryRowsWithShipmentStatus: legacyRows,
   kpis,
   setActiveTab,
   setIsInventoryFiltersOpen,
@@ -24,7 +25,7 @@ export default function InventoryKpis({
   const [chart, setChart] = useState("bars");
   const [pickedPallet, setPickedPallet] = useState("");
 
-  const rows = inventoryRowsWithShipmentStatus;
+  const rows = applyAllocations(legacyRows, allocationsByItem);
   const tiles = inventoryTiles(rows, allocationsByItem, summarizeAllocations(allocations || []));
   const overall = buildBreakdown(rows, dim, measure);
 

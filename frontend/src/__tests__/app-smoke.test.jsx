@@ -207,3 +207,28 @@ describe("Shipments feed the dashboard without hiding stock", () => {
     expect(within(value).getAllByRole("cell")[1].textContent).toBe("$0.00");
   });
 });
+
+describe("Total Inventory allocation status", () => {
+  it("keeps a partly pulled lot selectable and disables a fully pulled one", async () => {
+    fetch.mockImplementation((url) => {
+      if (String(url).endsWith("/items")) return json(ITEMS);
+      if (String(url).endsWith("/kpis")) return json({});
+      if (String(url).endsWith("/allocations")) {
+        return json([
+          { item_id: "s1", stage: "pulling", quantity: 4 },
+          { item_id: "s2", stage: "planned", quantity: 10 },
+          { item_id: "s3", stage: "consolidated", quantity: 10 },
+        ]);
+      }
+      return json([]);
+    });
+    render(<App />);
+    await waitFor(() => expect(screen.getAllByText("4 pulled").length).toBeGreaterThan(0));
+    expect(screen.getByLabelText("Select supply s1").disabled).toBe(false);
+    expect(screen.getAllByText("All 10 pulled").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Consolidated", { selector: ".tag" }).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Select supply s2")).toBeNull();
+    expect(screen.getByLabelText(/Supply s2 is fully pulled/)).toBeTruthy();
+    expect(screen.queryAllByText("Pulled", { selector: ".tag" })).toHaveLength(0); // no legacy "Pulled" tag on a lot with stock left
+  });
+});

@@ -540,18 +540,9 @@ tbody tr:hover {
   background: #f4f4f4;
 }
 
-tbody tr.inventory-row-review,
-tbody tr.inventory-row-review:hover {
-  background: #fdecea;
-}
-
+/* Row flags are a 3px left border, not a tinted row. */
 tbody tr.inventory-row-review td:first-child {
   box-shadow: inset 3px 0 0 #9b1c1c;
-}
-
-tbody tr.inventory-row-partial,
-tbody tr.inventory-row-partial:hover {
-  background: #fef3c7;
 }
 
 tbody tr.inventory-row-partial td:first-child {
