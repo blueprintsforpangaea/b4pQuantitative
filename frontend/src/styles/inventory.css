@@ -99,19 +99,6 @@
   .category-pie-card .expiration-pie-legend {
     grid-template-columns: 1fr;
   }
-
-  .pallet-mini-chart-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .pallet-map-canvas {
-    width: 1520px;
-    min-height: 1120px;
-  }
-
-  .pallet-modal-metrics {
-    grid-template-columns: 1fr;
-  }
 }
 
 .table-wrap {

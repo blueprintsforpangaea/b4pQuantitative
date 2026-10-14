@@ -105,3 +105,38 @@ describe("Total Inventory partial pulls", () => {
     expect(screen.getByText(/6 units/)).toBeTruthy(); // 10 on hand - 4 pulled
   });
 });
+
+describe("Inventory KPIs", () => {
+  async function openKpis() {
+    render(<App />);
+    await waitFor(() => expect(screen.queryByText(/Loading dashboard data/)).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Inventory KPIs" }));
+  }
+
+  it("shows four question tiles and no pallet map or removed metrics", async () => {
+    await openKpis();
+    for (const question of ["How much do we have?", "What needs pulling now?", "What should ship next?", "How much is already moving?"]) {
+      expect(screen.getByText(question)).toBeTruthy();
+    }
+    expect(screen.queryByText(/Box Count/i)).toBeNull();
+    expect(screen.queryByText(/Avg Boxes per Pallet/i)).toBeNull();
+    expect(screen.queryByText(/pallet map/i)).toBeNull();
+  });
+
+  it("switches the breakdown and opens a bar in Total Inventory", async () => {
+    await openKpis();
+    fireEvent.click(screen.getByRole("button", { name: "Category" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ring" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bars" }));
+    const rows = screen.getAllByRole("list")[0];
+    fireEvent.click(within(rows).getByRole("button", { name: /IV Supplies/ }));
+    expect(screen.getByRole("button", { name: "Total Inventory" }).className).toContain("active");
+    expect(screen.getByText("Synthetic supply s2")).toBeTruthy();
+    expect(screen.queryByText("Synthetic supply s1")).toBeNull();
+  });
+
+  it("lets the pallet panel pick a pallet and defaults to the latest", async () => {
+    await openKpis();
+    expect(screen.getByRole("combobox").value).toBe("2");
+  });
+});
