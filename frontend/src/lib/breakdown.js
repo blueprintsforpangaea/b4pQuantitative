@@ -40,10 +40,16 @@ export function buildBreakdown(rows, dim, measure = "units") {
       filter: { type: "duration", values: [label] },
     }));
   } else if (dim === "workflow") {
-    groups = supplyStatusOrder.map((label) => ({
-      id: label, label, color: supplyStatusColors[label],
-      rows: rows.filter((row) => row.supplyWorkflowStatus === label),
-      filter: { type: "workflow", values: [label] },
+    // Workflow status is about units, not lots: a partly pulled lot counts in both Inventory and Pulled.
+    // Rows come from applyAllocations; a row without allocation fields is all Inventory.
+    const unitsIn = (row, label) => {
+      if (row.availableUnits === undefined) {
+        return label === "Inventory" ? row.quantity || 0 : 0;
+      }
+      return { Inventory: row.availableUnits, Pulled: row.pulledUnits, Consolidated: row.consolidatedUnits }[label] || 0;
+    };
+    return buildUnitSplit(rows, measure, supplyStatusOrder, unitsIn, (label) => ({
+      id: label, label, color: supplyStatusColors[label], filter: { type: "workflow", values: [label] },
     }));
   } else if (dim === "category") {
     const byCategory = new Map();
@@ -81,6 +87,24 @@ export function buildBreakdown(rows, dim, measure = "units") {
       entries: segment.entries, filter: segment.filter,
       percent: total > 0 ? (segment.value / total) * 100 : 0,
     })),
+  };
+}
+
+function buildUnitSplit(rows, measure, labels, unitsIn, describe) {
+  const segments = labels
+    .map((label) => {
+      const touched = rows.filter((row) => unitsIn(row, label) > 0);
+      const value = touched.reduce(
+        (total, row) => total + (measure === "value" ? unitsIn(row, label) * (Number(row.unitPrice) || 0) : unitsIn(row, label)),
+        0
+      );
+      return { ...describe(label), value, entries: touched.length };
+    })
+    .filter((segment) => segment.value > 0);
+  const total = segments.reduce((sum, segment) => sum + segment.value, 0);
+  return {
+    total,
+    segments: segments.map((segment) => ({ ...segment, percent: total > 0 ? (segment.value / total) * 100 : 0 })),
   };
 }
 

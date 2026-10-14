@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiryTierId, groupByProduct, productKey, productName } from "../lib/inventory.js";
+import { allocationTags, applyAllocations, expiryTierId, groupByProduct, productKey, productName } from "../lib/inventory.js";
 
 describe("productName", () => {
   it.each([
@@ -71,5 +71,44 @@ describe("expiryTierId", () => {
     expect(expiryTierId(31)).toBe("d90");
     expect(expiryTierId(90)).toBe("d90");
     expect(expiryTierId(91)).toBe("ok");
+  });
+});
+
+describe("applyAllocations and allocationTags", () => {
+  const lot = (id, quantity) => ({ id, supplyId: id, quantity });
+  const byItem = new Map([
+    ["part", { pulled: 40, shipments: [{ shipment_id: "s1", shipment_name: "Run A", stage: "pulling", quantity: 40 }] }],
+    ["all", { pulled: 50, shipments: [{ shipment_id: "s1", stage: "planned", quantity: 50 }] }],
+    ["cons", { pulled: 30, shipments: [{ shipment_id: "s2", stage: "consolidated", quantity: 30 }] }],
+    ["over", { pulled: 99, shipments: [{ shipment_id: "s1", stage: "pulling", quantity: 99 }] }],
+  ]);
+  const rows = applyAllocations([lot("part", 150), lot("all", 50), lot("cons", 30), lot("none", 10), lot("over", 20)], byItem);
+  const by = Object.fromEntries(rows.map((row) => [row.id, row]));
+
+  it("derives available = on hand - allocated and clamps over-allocation", () => {
+    expect([by.part.availableUnits, by.part.pulledUnits]).toEqual([110, 40]);
+    expect([by.all.availableUnits, by.all.pulledUnits]).toEqual([0, 50]);
+    expect([by.cons.availableUnits, by.cons.consolidatedUnits]).toEqual([0, 30]);
+    expect([by.over.pulledUnits, by.over.availableUnits]).toEqual([20, 0]);
+    expect(by.none.availableUnits).toBe(10);
+  });
+
+  it("tags a partly pulled lot Available + N pulled, and keeps it selectable", () => {
+    expect(allocationTags([by.part]).map((tag) => tag.label)).toEqual(["Available", "40 pulled"]);
+    expect(by.part.inventoryStatus).toBe("Available");
+    expect(by.part.workflowStatuses).toEqual(["Inventory", "Pulled"]);
+  });
+
+  it("tags a fully pulled lot with one tag, Consolidated when every allocation is consolidated", () => {
+    expect(allocationTags([by.all]).map((tag) => tag.label)).toEqual(["All 50 pulled"]);
+    expect(allocationTags([by.cons]).map((tag) => tag.label)).toEqual(["Consolidated"]);
+    expect(by.all.inventoryStatus).toBe("Pulled");
+    expect(by.cons.inventoryStatus).toBe("Consolidated");
+  });
+
+  it("aggregates a group the same way", () => {
+    expect(allocationTags([by.part, by.all, by.none]).map((tag) => tag.label)).toEqual(["Available", "90 pulled"]);
+    expect(allocationTags([by.all, by.over]).map((tag) => tag.label)).toEqual(["All 70 pulled"]);
+    expect(allocationTags([by.none]).map((tag) => tag.label)).toEqual(["Available"]);
   });
 });

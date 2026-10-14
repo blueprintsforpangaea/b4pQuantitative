@@ -74,6 +74,8 @@ export function sortItemsByExpiration(items) {
   });
 }
 
+// Legacy, localStorage-era status. Only App.jsx still calls it; Total Inventory and Inventory KPIs
+// derive status from allocations (applyAllocations) instead.
 export function inventoryStatusForItem(itemId, shipments) {
   const isPulled = shipments
     .filter((shipment) => !shipment.isCompleted)
@@ -82,6 +84,69 @@ export function inventoryStatusForItem(itemId, shipments) {
   );
 
   return isPulled ? "Pulled" : "Available";
+}
+
+// Splits each lot's units by what the shipment allocations say. available = on hand - allocated;
+// consolidated units are the allocations whose shipment is in the consolidated stage.
+export function applyAllocations(rows, byItem) {
+  return rows.map((row) => {
+    const quantity = row.quantity || 0;
+    const entry = byItem?.get(String(row.id));
+    const stageUnits = (entry?.shipments || []).reduce(
+      (totals, allocation) => {
+        const units = Number(allocation.quantity) || 0;
+        if (allocation.stage === "consolidated") {
+          totals.consolidated += units;
+        } else {
+          totals.pulled += units;
+        }
+        return totals;
+      },
+      { pulled: 0, consolidated: 0 }
+    );
+    const consolidatedUnits = Math.min(stageUnits.consolidated, quantity);
+    const pulledUnits = Math.min(stageUnits.pulled, quantity - consolidatedUnits);
+    const allocatedUnits = pulledUnits + consolidatedUnits;
+    const availableUnits = quantity - allocatedUnits;
+    const workflowStatuses = [
+      ...(availableUnits > 0 || quantity === 0 ? ["Inventory"] : []),
+      ...(pulledUnits > 0 ? ["Pulled"] : []),
+      ...(consolidatedUnits > 0 ? ["Consolidated"] : []),
+    ];
+    const fullyAllocated = quantity > 0 && availableUnits === 0;
+
+    return {
+      ...row,
+      pulledUnits,
+      consolidatedUnits,
+      allocatedUnits,
+      availableUnits,
+      workflowStatuses,
+      inventoryStatus: !fullyAllocated ? "Available" : consolidatedUnits === allocatedUnits ? "Consolidated" : "Pulled",
+      supplyWorkflowStatus: workflowStatuses[0] || "Inventory",
+    };
+  });
+}
+
+// The status tags for one lot or a group of lots (rows already passed through applyAllocations):
+//   some stock left   -> "Available", plus "N pulled" when part is allocated
+//   nothing left      -> one tag, "Consolidated" (every allocation consolidated) or "All N pulled"
+export function allocationTags(rows) {
+  const allocated = rows.reduce((total, row) => total + (row.allocatedUnits || 0), 0);
+  const consolidated = rows.reduce((total, row) => total + (row.consolidatedUnits || 0), 0);
+  const hasStock = rows.some((row) => (row.availableUnits ?? row.quantity ?? 0) > 0);
+
+  if (hasStock) {
+    return allocated > 0
+      ? [{ label: "Available", tone: "available" }, { label: `${allocated.toLocaleString()} pulled`, tone: "partial" }]
+      : [{ label: "Available", tone: "available" }];
+  }
+  if (allocated > 0 && consolidated === allocated) {
+    return [{ label: "Consolidated", tone: "consolidated" }];
+  }
+  return allocated > 0
+    ? [{ label: `All ${allocated.toLocaleString()} pulled`, tone: "pulled" }]
+    : [{ label: "Available", tone: "available" }];
 }
 
 export function buildFacetCounts(rows, key, preferredOrder = []) {

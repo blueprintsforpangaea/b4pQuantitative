@@ -1,8 +1,7 @@
 import { Fragment, useState } from "react";
 import { durationBucketOrder, expiryTiers, supplyStatusOrder } from "../lib/colors.js";
 import { formatCurrency, formatNumber } from "../lib/format.js";
-import { buildFacetCounts, groupByProduct } from "../lib/inventory.js";
-import { availableQty } from "../lib/shipments.js";
+import { allocationTags, applyAllocations, buildFacetCounts, groupByProduct } from "../lib/inventory.js";
 
 const tierById = Object.fromEntries(expiryTiers.map((tier) => [tier.id, tier]));
 const GROUP_OPTIONS = [
@@ -25,18 +24,18 @@ function shipmentNames(allocation) {
   return [...new Set(allocation.shipments.map((entry) => entry.shipment_name).filter(Boolean))].join(", ");
 }
 
-function StatusTag({ status }) {
-  return <span className={`tag tag-status tag-${status.toLowerCase()}`}>{status}</span>;
-}
-
-function PulledTag({ units }) {
-  return units > 0 ? <span className="tag tag-status tag-partial">{formatNumber(units)} pulled</span> : null;
+function AllocationTags({ rows }) {
+  return allocationTags(rows).map((tag) => (
+    <span key={tag.label} className={`tag tag-status tag-${tag.tone}`}>
+      {tag.label}
+    </span>
+  ));
 }
 
 export default function TotalInventory({
   allocationsByItem,
   clearInventoryFilters,
-  inventoryRowsWithShipmentStatus,
+  inventoryRowsWithShipmentStatus: legacyRows,
   inventoryRowsWithStatus,
   inventoryShipmentButtonRef,
   isInventoryFiltersOpen,
@@ -70,6 +69,7 @@ export default function TotalInventory({
 }) {
   const [expandedKeys, setExpandedKeys] = useState(() => new Set());
   const [groupBy, setGroupBy] = useState("category");
+  const inventoryRowsWithShipmentStatus = applyAllocations(legacyRows, allocationsByItem);
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const expirationOptions = buildFacetCounts(inventoryRowsWithStatus, "expirationFilter", [
@@ -102,11 +102,10 @@ export default function TotalInventory({
 
   const boxTypeOptions = buildFacetCounts(inventoryRowsWithStatus, "boxType");
 
-  const workflowStatusOptions = buildFacetCounts(
-    inventoryRowsWithShipmentStatus,
-    "supplyWorkflowStatus",
-    supplyStatusOrder
-  );
+  const workflowStatusOptions = supplyStatusOrder.map((value) => ({
+    value,
+    count: inventoryRowsWithShipmentStatus.filter((row) => row.workflowStatuses.includes(value)).length,
+  }));
 
   function buildSections(rows, mode) {
     if (mode === "category") {
@@ -144,7 +143,7 @@ export default function TotalInventory({
   }
 
   function toggleInventorySelection(item) {
-    if (item.inventoryStatus !== "Available") {
+    if (item.availableUnits <= 0) {
       return;
     }
 
@@ -157,7 +156,7 @@ export default function TotalInventory({
 
   function toggleSelectAllFiltered() {
     const filteredIds = filteredInventoryRows
-      .filter((row) => row.inventoryStatus === "Available")
+      .filter((row) => row.availableUnits > 0)
       .map((row) => row.id);
     const allSelected =
       filteredIds.length > 0 && filteredIds.every((id) => selectedInventoryIds.includes(id));
@@ -189,7 +188,8 @@ export default function TotalInventory({
       matchesSelectedFilter(selectedDuration, row.durationFilter) &&
       (skip === "tier" || matchesSelectedFilter(selectedExpiryTiers, row.expiryTier)) &&
       (skip === "category" || matchesSelectedFilter(selectedCategories, row.category)) &&
-      matchesSelectedFilter(selectedWorkflowStatuses, row.supplyWorkflowStatus)
+      (selectedWorkflowStatuses.length === 0 ||
+        row.workflowStatuses.some((status) => selectedWorkflowStatuses.includes(status)))
     );
   }
 
@@ -218,7 +218,7 @@ export default function TotalInventory({
   }
 
   function toggleGroupSelection(group) {
-    const ids = group.rows.filter((row) => row.inventoryStatus === "Available").map((row) => row.id);
+    const ids = group.rows.filter((row) => row.availableUnits > 0).map((row) => row.id);
     const allSelected = ids.length > 0 && ids.every((id) => selectedInventoryIds.includes(id));
     setSelectedInventoryIds((currentIds) =>
       allSelected
@@ -228,7 +228,7 @@ export default function TotalInventory({
   }
 
   const selectableFilteredInventoryRows = filteredInventoryRows.filter(
-    (row) => row.inventoryStatus === "Available"
+    (row) => row.availableUnits > 0
   );
 
   const selectedInventoryItems = selectableFilteredInventoryRows.filter((row) =>
@@ -272,21 +272,19 @@ export default function TotalInventory({
   // Partial pulls: part of a lot sits in an active shipment, the rest is still free.
   function renderLotRow(row, nested) {
     const allocation = allocationsByItem?.get(String(row.id));
-    const pulled = Math.min(allocation?.pulled || 0, row.quantity || 0);
-    const available = availableQty(row.quantity, allocationsByItem || new Map(), row.id);
     return (
       <Fragment key={row.id}>
-        {renderLotLine(row, nested, pulled > 0, pulled >= (row.quantity || 0) ? "Pulled" : row.inventoryStatus, pulled < (row.quantity || 0) ? pulled : 0)}
-        {pulled > 0 ? (
+        {renderLotLine(row, nested)}
+        {row.allocatedUnits > 0 ? (
           <tr className="alloc-row">
             <td />
             <td colSpan="6">
               <div className="alloc-line alloc-pulled">
-                <strong>Pulled</strong> — {formatNumber(pulled)} units
+                <strong>Pulled</strong> — {formatNumber(row.allocatedUnits)} units
                 {shipmentNames(allocation) ? ` → ${shipmentNames(allocation)}` : ""}
               </div>
               <div className="alloc-line">
-                <strong>Available</strong> — {formatNumber(available)} units
+                <strong>Available</strong> — {formatNumber(row.availableUnits)} units
               </div>
             </td>
           </tr>
@@ -295,20 +293,20 @@ export default function TotalInventory({
     );
   }
 
-  function renderLotLine(row, nested, hasPull, displayStatus, partialPulled) {
+  function renderLotLine(row, nested) {
     return (
       <tr
         className={[
           nested ? "lot-row" : "",
-          hasPull ? "has-alloc" : "",
+          row.allocatedUnits > 0 ? "has-alloc" : "",
           row.needsReview ? "inventory-row-review" : "",
-          row.isPartiallyRequested ? "inventory-row-partial" : "",
+          row.allocatedUnits > 0 && row.availableUnits > 0 ? "inventory-row-partial" : "",
         ]
           .filter(Boolean)
           .join(" ") || undefined}
       >
         <td>
-          {row.inventoryStatus === "Available" ? (
+          {row.availableUnits > 0 ? (
             <input
               type="checkbox"
               aria-label={`Select supply ${row.supplyId}`}
@@ -319,8 +317,8 @@ export default function TotalInventory({
             <span
               className="inventory-selection-unavailable"
               role="img"
-              aria-label={`${row.inventoryStatus} supply cannot be selected`}
-              title={`${row.inventoryStatus} supplies cannot be selected again`}
+              aria-label={`Supply ${row.supplyId} is fully pulled and cannot be selected`}
+              title="Every unit is already in a shipment"
             >
               ×
             </span>
@@ -343,8 +341,7 @@ export default function TotalInventory({
                 {row.manufacturer !== "Unknown" ? ` · ${row.manufacturer}` : ""}
               </div>
               <div className="status-inline">
-                <StatusTag status={displayStatus} />
-                <PulledTag units={partialPulled} />
+                <AllocationTags rows={[row]} />
                 <ExpiryTag row={row} />
               </div>
             </div>
@@ -352,8 +349,7 @@ export default function TotalInventory({
         </td>
         <td>
           <span className="tag-stack">
-            <StatusTag status={displayStatus} />
-            <PulledTag units={partialPulled} />
+            <AllocationTags rows={[row]} />
           </span>
         </td>
         <td>
@@ -376,14 +372,8 @@ export default function TotalInventory({
 
     const key = `${sectionId}::${group.key}`;
     const isOpen = expandedKeys.has(key);
-    const selectableIds = group.rows.filter((row) => row.inventoryStatus === "Available").map((row) => row.id);
+    const selectableIds = group.rows.filter((row) => row.availableUnits > 0).map((row) => row.id);
     const selectedCount = selectableIds.filter((id) => selectedInventoryIds.includes(id)).length;
-    const statuses = [...new Set(group.rows.map((row) => row.inventoryStatus))];
-    const pulledUnits = group.rows.reduce(
-      (total, row) =>
-        total + Math.min(allocationsByItem?.get(String(row.id))?.pulled || 0, row.quantity || 0),
-      0
-    );
     const prices = group.rows.map((row) => row.unitPrice);
     const lowPrice = Math.min(...prices);
     const highPrice = Math.max(...prices);
@@ -422,10 +412,7 @@ export default function TotalInventory({
                   {group.rows.length} lots/variants · {group.category}
                 </span>
                 <span className="status-inline tag-stack">
-                  {statuses.map((status) => (
-                    <StatusTag key={status} status={status} />
-                  ))}
-                  <PulledTag units={pulledUnits} />
+                  <AllocationTags rows={group.rows} />
                   <ExpiryTag row={soonest} />
                 </span>
               </span>
@@ -433,10 +420,7 @@ export default function TotalInventory({
           </td>
           <td>
             <span className="tag-stack">
-              {statuses.map((status) => (
-                <StatusTag key={status} status={status} />
-              ))}
-              <PulledTag units={pulledUnits} />
+              <AllocationTags rows={group.rows} />
             </span>
           </td>
           <td>
