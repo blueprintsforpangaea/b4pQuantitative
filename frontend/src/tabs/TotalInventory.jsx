@@ -1,8 +1,36 @@
-import { durationBucketOrder, supplyStatusOrder } from "../lib/colors.js";
+import { Fragment, useState } from "react";
+import { durationBucketOrder, expiryTiers, supplyStatusOrder } from "../lib/colors.js";
 import { formatCurrency, formatNumber } from "../lib/format.js";
-import { buildFacetCounts } from "../lib/inventory.js";
+import { buildFacetCounts, groupByProduct } from "../lib/inventory.js";
+import { availableQty } from "../lib/shipments.js";
+
+const tierById = Object.fromEntries(expiryTiers.map((tier) => [tier.id, tier]));
+const GROUP_OPTIONS = [
+  { id: "none", label: "None" },
+  { id: "category", label: "Category" },
+  { id: "expiry", label: "Expiry date" },
+];
+
+function ExpiryTag({ row }) {
+  const tier = tierById[row.expiryTier];
+  return (
+    <span className="tag" style={{ background: tier.color }}>
+      {row.expiryTier === "none" ? tier.label : row.expirationStatus.label}
+    </span>
+  );
+}
+
+function StatusTag({ status, count }) {
+  return (
+    <span className={`tag tag-status tag-${status.toLowerCase()}`}>
+      {status}
+      {count ? ` ${count}` : ""}
+    </span>
+  );
+}
 
 export default function TotalInventory({
+  allocationsByItem,
   clearInventoryFilters,
   currentShipments,
   inventoryRowsWithShipmentStatus,
@@ -18,6 +46,7 @@ export default function TotalInventory({
   selectedCategories,
   selectedDuration,
   selectedExpiration,
+  selectedExpiryTiers,
   selectedInventoryIds,
   selectedPallets,
   selectedWorkflowStatuses,
@@ -34,18 +63,17 @@ export default function TotalInventory({
   setSelectedCategories,
   setSelectedDuration,
   setSelectedExpiration,
+  setSelectedExpiryTiers,
   setSelectedInventoryIds,
   setSelectedPallets,
   setSelectedShipmentId,
   setSelectedWorkflowStatuses,
-  setShowAvailableItems,
-  setShowNonAvailableItems,
   setValuationRange,
-  showAvailableItems,
   showFloatingInventoryAction,
-  showNonAvailableItems,
   valuationRange,
 }) {
+  const [expandedKeys, setExpandedKeys] = useState(() => new Set());
+  const [groupBy, setGroupBy] = useState("none");
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const expirationOptions = buildFacetCounts(inventoryRowsWithStatus, "expirationFilter", [
@@ -62,8 +90,6 @@ export default function TotalInventory({
     "durationFilter",
     durationBucketOrder
   );
-
-  const categoryOptions = buildFacetCounts(inventoryRowsWithStatus, "category");
 
   const palletOptions = buildFacetCounts(inventoryRowsWithStatus, "palletNumber").sort(
     (left, right) => {
@@ -85,6 +111,20 @@ export default function TotalInventory({
     "supplyWorkflowStatus",
     supplyStatusOrder
   );
+
+  function buildSections(rows, mode) {
+    if (mode === "category") {
+      return buildFacetCounts(rows, "category")
+        .filter((entry) => entry.count > 0)
+        .map((entry) => ({ id: entry.value, label: entry.value, rows: rows.filter((row) => row.category === entry.value) }));
+    }
+    if (mode === "expiry") {
+      return expiryTiers
+        .map((tier) => ({ id: tier.id, label: tier.label, color: tier.color, rows: rows.filter((row) => row.expiryTier === tier.id) }))
+        .filter((section) => section.rows.length > 0);
+    }
+    return [{ id: "all", label: "", rows }];
+  }
 
   function matchesSelectedFilter(selectedValues, rowValue) {
     return selectedValues.length === 0 || selectedValues.includes(rowValue);
@@ -141,10 +181,11 @@ export default function TotalInventory({
     });
   }
 
-  const filteredInventoryRows = inventoryRowsWithShipmentStatus.filter((row) => {
+  // skip lets the category chips and expiry legend count "what would I get if I picked this".
+  function rowPasses(row, skip = "") {
     const matchesSearch =
       !normalizedSearch ||
-      [row.generalSupply, row.exactSupplyName, row.manufacturer].some((value) =>
+      [row.generalSupply, row.exactSupplyName, row.manufacturer, row.category].some((value) =>
         value.toLowerCase().includes(normalizedSearch)
       );
 
@@ -152,16 +193,49 @@ export default function TotalInventory({
       matchesSearch &&
       row.unitPrice >= valuationRange.min &&
       row.unitPrice <= valuationRange.max &&
-      (!showAvailableItems || row.inventoryStatus === "Available") &&
-      (!showNonAvailableItems || row.inventoryStatus !== "Available") &&
       matchesSelectedFilter(selectedPallets, row.palletNumber) &&
       matchesSelectedFilter(selectedBoxTypes, row.boxType) &&
       matchesSelectedFilter(selectedExpiration, row.expirationFilter) &&
       matchesSelectedFilter(selectedDuration, row.durationFilter) &&
-      matchesSelectedFilter(selectedCategories, row.category) &&
+      (skip === "tier" || matchesSelectedFilter(selectedExpiryTiers, row.expiryTier)) &&
+      (skip === "category" || matchesSelectedFilter(selectedCategories, row.category)) &&
       matchesSelectedFilter(selectedWorkflowStatuses, row.supplyWorkflowStatus)
     );
-  });
+  }
+
+  const filteredInventoryRows = inventoryRowsWithShipmentStatus.filter((row) => rowPasses(row));
+
+  const categoryChips = buildFacetCounts(
+    inventoryRowsWithShipmentStatus.filter((row) => rowPasses(row, "category")),
+    "category"
+  );
+  const tierCounts = inventoryRowsWithShipmentStatus
+    .filter((row) => rowPasses(row, "tier"))
+    .reduce((counts, row) => ({ ...counts, [row.expiryTier]: (counts[row.expiryTier] || 0) + 1 }), {});
+
+  const sections = buildSections(filteredInventoryRows, groupBy);
+
+  function toggleExpanded(key) {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function toggleGroupSelection(group) {
+    const ids = group.rows.filter((row) => row.inventoryStatus === "Available").map((row) => row.id);
+    const allSelected = ids.length > 0 && ids.every((id) => selectedInventoryIds.includes(id));
+    setSelectedInventoryIds((currentIds) =>
+      allSelected
+        ? currentIds.filter((id) => !ids.includes(id))
+        : [...new Set([...currentIds, ...ids])]
+    );
+  }
 
   const selectableFilteredInventoryRows = filteredInventoryRows.filter(
     (row) => row.inventoryStatus === "Available"
@@ -179,8 +253,7 @@ export default function TotalInventory({
     selectedPallets.length > 0 ||
     selectedBoxTypes.length > 0 ||
     selectedWorkflowStatuses.length > 0 ||
-    showAvailableItems ||
-    showNonAvailableItems ||
+    selectedExpiryTiers.length > 0 ||
     valuationRange.min !== minUnitPrice ||
     valuationRange.max !== maxUnitPrice;
 
@@ -188,32 +261,220 @@ export default function TotalInventory({
     selectableFilteredInventoryRows.length > 0 &&
     selectableFilteredInventoryRows.every((row) => selectedInventoryIds.includes(row.id));
 
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <div>
-          <p className="section-label">Total Inventory</p>
-          <h2>Every supply as a line item</h2>
-        </div>
-        <div className="inventory-actions">
-          <button
-            type="button"
-            className="secondary-button inventory-filter-button"
-            onClick={() => setIsInventoryFiltersOpen(true)}
-            aria-expanded={isInventoryFiltersOpen}
-            aria-controls="inventory-filters"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16M7 12h10M10 18h4" />
-            </svg>
-            Filters
-          </button>
-          {hasActiveInventoryFilters ? (
+  const filterButton = (
+    <button
+      type="button"
+      className="secondary-button inventory-filter-button"
+      onClick={() => setIsInventoryFiltersOpen(true)}
+      aria-expanded={isInventoryFiltersOpen}
+      aria-controls="inventory-filters"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16M7 12h10M10 18h4" />
+      </svg>
+      Filters
+    </button>
+  );
+  const addToShipmentLabel = `Add Selected To Shipment${
+    selectedInventoryItems.length > 0 ? ` (${formatNumber(selectedInventoryItems.length)})` : ""
+  }`;
+
+  // Partial pulls: part of a lot sits in an active shipment, the rest is still free.
+  function renderLotRow(row, nested) {
+    const allocation = allocationsByItem?.get(String(row.id));
+    const pulled = Math.min(allocation?.pulled || 0, row.quantity || 0);
+    const available = availableQty(row.quantity, allocationsByItem || new Map(), row.id);
+    return (
+      <Fragment key={row.id}>
+        {renderLotLine(row, nested, pulled > 0, pulled >= (row.quantity || 0) ? "Pulled" : pulled > 0 ? "Partial" : row.inventoryStatus)}
+        {pulled > 0 ? (
+          <tr className="alloc-row">
+            <td />
+            <td colSpan="6">
+              <div className="alloc-line alloc-pulled">
+                <strong>Pulled</strong> — {formatNumber(pulled)} units →{" "}
+                {allocation.shipments.map((entry) => entry.shipment_name).join(", ")}
+              </div>
+              <div className="alloc-line">
+                <strong>Available</strong> — {formatNumber(available)} units
+              </div>
+            </td>
+          </tr>
+        ) : null}
+      </Fragment>
+    );
+  }
+
+  function renderLotLine(row, nested, hasPull, displayStatus) {
+    return (
+      <tr
+        className={[
+          nested ? "lot-row" : "",
+          hasPull ? "has-alloc" : "",
+          row.needsReview ? "inventory-row-review" : "",
+          row.isPartiallyRequested ? "inventory-row-partial" : "",
+        ]
+          .filter(Boolean)
+          .join(" ") || undefined}
+      >
+        <td>
+          {row.inventoryStatus === "Available" ? (
+            <input
+              type="checkbox"
+              aria-label={`Select supply ${row.supplyId}`}
+              checked={selectedInventoryIds.includes(row.id)}
+              onChange={() => toggleInventorySelection(row)}
+            />
+          ) : (
+            <span
+              className="inventory-selection-unavailable"
+              role="img"
+              aria-label={`${row.inventoryStatus} supply cannot be selected`}
+              title={`${row.inventoryStatus} supplies cannot be selected again`}
+            >
+              ×
+            </span>
+          )}
+        </td>
+        <td>
+          <div className="product-cell">
             <button
               type="button"
-              className="secondary-button"
-              onClick={clearInventoryFilters}
+              className="info-icon-button"
+              onClick={() => openDetailsModal(row)}
+              aria-label={`Open details for supply ${row.supplyId}`}
             >
+              ⓘ
+            </button>
+            <div>
+              <div className="product-name">{row.exactSupplyName}</div>
+              <div className="product-meta">
+                {row.locationInfo}
+                {row.manufacturer !== "Unknown" ? ` · ${row.manufacturer}` : ""}
+              </div>
+              <div className="status-inline">
+                <StatusTag status={displayStatus} />
+                <ExpiryTag row={row} />
+              </div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <StatusTag status={displayStatus} />
+        </td>
+        <td>
+          <div className="expiration-cell">
+            <span>{row.expirationDate}</span>
+            <ExpiryTag row={row} />
+          </div>
+        </td>
+        <td className="num">{formatNumber(row.quantity)}</td>
+        <td className="num">{formatCurrency(row.unitPrice)}</td>
+        <td className="num">{formatCurrency(row.valuation)}</td>
+      </tr>
+    );
+  }
+
+  function renderGroup(group, sectionId) {
+    if (group.rows.length === 1) {
+      return renderLotRow(group.rows[0], false);
+    }
+
+    const key = `${sectionId}::${group.key}`;
+    const isOpen = expandedKeys.has(key);
+    const selectableIds = group.rows.filter((row) => row.inventoryStatus === "Available").map((row) => row.id);
+    const selectedCount = selectableIds.filter((id) => selectedInventoryIds.includes(id)).length;
+    const statusCounts = group.rows.reduce((counts, row) => {
+      counts[row.inventoryStatus] = (counts[row.inventoryStatus] || 0) + 1;
+      return counts;
+    }, {});
+    const soonest = group.rows.find((row) => row.expirationDaysLeft === group.soonestDaysLeft) || group.rows[0];
+
+    return (
+      <>
+        <tr key={key} className="group-row">
+          <td>
+            <input
+              type="checkbox"
+              aria-label={`Select all available lots of ${group.name}`}
+              checked={selectableIds.length > 0 && selectedCount === selectableIds.length}
+              ref={(node) => {
+                if (node) {
+                  node.indeterminate = selectedCount > 0 && selectedCount < selectableIds.length;
+                }
+              }}
+              disabled={selectableIds.length === 0}
+              onChange={() => toggleGroupSelection(group)}
+            />
+          </td>
+          <td>
+            <button
+              type="button"
+              className="group-toggle"
+              onClick={() => toggleExpanded(key)}
+              aria-expanded={isOpen}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className={isOpen ? "chevron open" : "chevron"}>
+                <path d="M9 6l6 6-6 6" />
+              </svg>
+              <span>
+                <span className="product-name">{group.name}</span>
+                <span className="product-meta">
+                  {group.rows.length} lots/variants · {group.category}
+                </span>
+                <span className="status-inline tag-stack">
+                  {Object.entries(statusCounts).map(([status, count]) => (
+                    <StatusTag key={status} status={status} count={count} />
+                  ))}
+                  <ExpiryTag row={soonest} />
+                </span>
+              </span>
+            </button>
+          </td>
+          <td>
+            <span className="tag-stack">
+              {Object.entries(statusCounts).map(([status, count]) => (
+                <StatusTag key={status} status={status} count={count} />
+              ))}
+            </span>
+          </td>
+          <td>
+            <div className="expiration-cell">
+              <span>Soonest {soonest.expirationDate}</span>
+              <ExpiryTag row={soonest} />
+            </div>
+          </td>
+          <td className="num">{formatNumber(group.totalQuantity)}</td>
+          <td className="num">—</td>
+          <td className="num">{formatCurrency(group.totalValue)}</td>
+        </tr>
+        {isOpen ? group.rows.map((row) => renderLotRow(row, true)) : null}
+      </>
+    );
+  }
+
+  const productCount = sections.reduce((total, section) => total + groupByProduct(section.rows).length, 0);
+
+  return (
+    <section className="panel">
+      <div className="inventory-toolbar">
+        <div className="inventory-search">
+          <label className="search-label" htmlFor="inventory-search">
+            Search inventory
+          </label>
+          <input
+            id="inventory-search"
+            className="search-input"
+            type="search"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Search by supply, category, or manufacturer"
+          />
+        </div>
+        <div className="inventory-actions">
+          {filterButton}
+          {hasActiveInventoryFilters ? (
+            <button type="button" className="secondary-button" onClick={clearInventoryFilters}>
               Clear all
             </button>
           ) : null}
@@ -224,35 +485,83 @@ export default function TotalInventory({
             disabled={selectedInventoryItems.length === 0}
             onClick={() => openShipmentModal(selectedInventoryItems)}
           >
-            Add Selected To Shipment
-            {selectedInventoryItems.length > 0
-              ? ` (${formatNumber(selectedInventoryItems.length)})`
-              : ""}
+            {addToShipmentLabel}
           </button>
-          <span className="pill">{formatNumber(filteredInventoryRows.length)} entries</span>
         </div>
+      </div>
+
+      <div className="category-chips" role="group" aria-label="Filter by category">
+        <button
+          type="button"
+          className={selectedCategories.length === 0 ? "chip active" : "chip"}
+          aria-pressed={selectedCategories.length === 0}
+          onClick={() => setSelectedCategories([])}
+        >
+          All
+          <span className="chip-count">
+            {formatNumber(categoryChips.reduce((total, chip) => total + chip.count, 0))}
+          </span>
+        </button>
+        {categoryChips.map((chip) => {
+          const active = selectedCategories.includes(chip.value);
+          return (
+            <button
+              key={chip.value}
+              type="button"
+              className={active ? "chip active" : "chip"}
+              aria-pressed={active}
+              onClick={() => toggleFilter(setSelectedCategories, selectedCategories, chip.value)}
+            >
+              {chip.value}
+              <span className="chip-count">{formatNumber(chip.count)}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="inventory-subbar">
+        <div className="expiry-legend" role="group" aria-label="Filter by expiry">
+          {expiryTiers.map((tier) => {
+            const active = selectedExpiryTiers.includes(tier.id);
+            return (
+              <button
+                key={tier.id}
+                type="button"
+                className={active ? "legend-item active" : "legend-item"}
+                aria-pressed={active}
+                onClick={() => toggleFilter(setSelectedExpiryTiers, selectedExpiryTiers, tier.id)}
+              >
+                <span className="legend-swatch" style={{ background: tier.color }} aria-hidden="true" />
+                {tier.label}
+                <span className="chip-count">{formatNumber(tierCounts[tier.id] || 0)}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="group-by" role="group" aria-label="Group by">
+          <span className="group-by-label">Group by</span>
+          {GROUP_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={groupBy === option.id ? "segment active" : "segment"}
+              aria-pressed={groupBy === option.id}
+              onClick={() => setGroupBy(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <span className="entry-count">
+          {formatNumber(productCount)} products · {formatNumber(filteredInventoryRows.length)} lines
+        </span>
       </div>
 
       {showFloatingInventoryAction ? (
         <div className="floating-inventory-actions">
-          <button
-            type="button"
-            className="secondary-button inventory-filter-button"
-            onClick={() => setIsInventoryFiltersOpen(true)}
-            aria-expanded={isInventoryFiltersOpen}
-            aria-controls="inventory-filters"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 6h16M7 12h10M10 18h4" />
-            </svg>
-            Filters
-          </button>
+          {filterButton}
           {hasActiveInventoryFilters ? (
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={clearInventoryFilters}
-            >
+            <button type="button" className="secondary-button" onClick={clearInventoryFilters}>
               Clear all
             </button>
           ) : null}
@@ -262,10 +571,7 @@ export default function TotalInventory({
             disabled={selectedInventoryItems.length === 0}
             onClick={() => openShipmentModal(selectedInventoryItems)}
           >
-            Add Selected To Shipment
-            {selectedInventoryItems.length > 0
-              ? ` (${formatNumber(selectedInventoryItems.length)})`
-              : ""}
+            {addToShipmentLabel}
           </button>
         </div>
       ) : null}
@@ -285,246 +591,110 @@ export default function TotalInventory({
               aria-modal="true"
               aria-labelledby="inventory-filters-title"
             >
-          <div className="filters-header">
-            <h3 id="inventory-filters-title">Filter Inventory</h3>
-            <div className="filters-header-actions">
-              <button
-                type="button"
-                className="clear-filters"
-                onClick={clearInventoryFilters}
-              >
-                Clear all
-              </button>
-              <button
-                type="button"
-                className="filter-drawer-close"
-                onClick={() => setIsInventoryFiltersOpen(false)}
-                aria-label="Close inventory filters"
-              >
-                ×
-              </button>
-            </div>
-          </div>
+              <div className="filters-header">
+                <h3 id="inventory-filters-title">Filter Inventory</h3>
+                <div className="filters-header-actions">
+                  <button type="button" className="clear-filters" onClick={clearInventoryFilters}>
+                    Clear all
+                  </button>
+                  <button
+                    type="button"
+                    className="filter-drawer-close"
+                    onClick={() => setIsInventoryFiltersOpen(false)}
+                    aria-label="Close inventory filters"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
 
-          <div className="search-row">
-            <label className="search-label" htmlFor="inventory-search">
-              Search inventory
-            </label>
-            <input
-              id="inventory-search"
-              className="search-input"
-              type="text"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search by general supply, exact name, or manufacturer"
-            />
-          </div>
-
-          <div className="availability-filter-group">
-            <div className="availability-toggle filter-availability-toggle">
-              <span>Show Available Items</span>
-              <button
-                type="button"
-                className={showAvailableItems ? "toggle-switch on" : "toggle-switch"}
-                onClick={() => {
-                  setShowAvailableItems((current) => !current);
-                  setShowNonAvailableItems(false);
-                }}
-                aria-label="Show available inventory items only"
-                aria-pressed={showAvailableItems}
-              >
-                <span className="toggle-knob" />
-              </button>
-            </div>
-            <div className="availability-toggle filter-availability-toggle">
-              <span>Show Non-Available Items</span>
-              <button
-                type="button"
-                className={showNonAvailableItems ? "toggle-switch on" : "toggle-switch"}
-                onClick={() => {
-                  setShowNonAvailableItems((current) => !current);
-                  setShowAvailableItems(false);
-                }}
-                aria-label="Show non-available inventory items only"
-                aria-pressed={showNonAvailableItems}
-              >
-                <span className="toggle-knob" />
-              </button>
-            </div>
-          </div>
-
-          <div className="filter-group">
-            <h4>Price per Unit</h4>
-            <div className="valuation-summary">
-              <span>{formatCurrency(valuationRange.min)}</span>
-              <span>{formatCurrency(valuationRange.max)}</span>
-            </div>
-            <div className="valuation-range-slider">
-              <div className="valuation-range-track" />
-              <div
-                className="valuation-range-active"
-                style={{
-                  left: `${
-                    maxUnitPrice === minUnitPrice
-                      ? 0
-                      : ((valuationRange.min - minUnitPrice) / (maxUnitPrice - minUnitPrice)) *
-                        100
-                  }%`,
-                  right: `${
-                    maxUnitPrice === minUnitPrice
-                      ? 0
-                      : 100 -
-                        ((valuationRange.max - minUnitPrice) / (maxUnitPrice - minUnitPrice)) *
-                          100
-                  }%`,
-                }}
-              />
-              <input
-                type="range"
-                min={minUnitPrice}
-                max={maxUnitPrice}
-                step="1"
-                value={valuationRange.min}
-                onChange={(event) => {
-                  const nextMin = Number(event.target.value);
-                  setValuationRange((currentRange) => ({
-                    min: Math.min(nextMin, currentRange.max),
-                    max: currentRange.max,
-                  }));
-                }}
-              />
-              <input
-                className="valuation-range-input valuation-range-input-max"
-                type="range"
-                min={minUnitPrice}
-                max={maxUnitPrice}
-                step="1"
-                value={valuationRange.max}
-                onChange={(event) => {
-                  const nextMax = Number(event.target.value);
-                  setValuationRange((currentRange) => ({
-                    min: currentRange.min,
-                    max: Math.max(nextMax, currentRange.min),
-                  }));
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="filter-group">
-            <h4>Pallet #</h4>
-            {palletOptions.map((option) => (
-              <label key={option.value} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selectedPallets.includes(option.value)}
-                  onChange={() =>
-                    toggleFilter(setSelectedPallets, selectedPallets, option.value)
-                  }
-                />
-                <span>{option.value}</span>
-                <span className="filter-count">{option.count}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="filter-group">
-            <h4>Box Type</h4>
-            {boxTypeOptions.map((option) => (
-              <label key={option.value} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selectedBoxTypes.includes(option.value)}
-                  onChange={() =>
-                    toggleFilter(setSelectedBoxTypes, selectedBoxTypes, option.value)
-                  }
-                />
-                <span>{option.value}</span>
-                <span className="filter-count">{option.count}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="filter-group">
-            <h4>Workflow Status</h4>
-            {workflowStatusOptions.map((option) => (
-              <label key={option.value} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selectedWorkflowStatuses.includes(option.value)}
-                  onChange={() =>
-                    toggleFilter(
-                      setSelectedWorkflowStatuses,
-                      selectedWorkflowStatuses,
-                      option.value
-                    )
-                  }
-                />
-                <span>{option.value}</span>
-                <span className="filter-count">{option.count}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="filter-group">
-            <h4>Expiration Date</h4>
-            {expirationOptions.map((option) => (
-              <label key={option.value} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selectedExpiration.includes(option.value)}
-                  onChange={() =>
-                    toggleFilter(setSelectedExpiration, selectedExpiration, option.value)
-                  }
-                />
-                <span>{option.value}</span>
-                <span className="filter-count">{option.count}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="filter-group">
-            <h4>Duration Date</h4>
-            {durationOptions.map((option) => (
-              <label key={option.value} className="filter-option">
-                <input
-                  type="checkbox"
-                  checked={selectedDuration.includes(option.value)}
-                  onChange={() =>
-                    toggleFilter(setSelectedDuration, selectedDuration, option.value)
-                  }
-                />
-                <span>{option.value}</span>
-                <span className="filter-count">{option.count}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="filter-group">
-            <h4>Supply Categories</h4>
-            <div className="category-filter-list">
-              {categoryOptions.map((option) => (
-                <label key={option.value} className="filter-option">
-                  <input
-                    type="checkbox"
-                    checked={selectedCategories.includes(option.value)}
-                    onChange={() =>
-                      toggleFilter(setSelectedCategories, selectedCategories, option.value)
-                    }
+              <div className="filter-group">
+                <h4>Price per Unit</h4>
+                <div className="valuation-summary">
+                  <span>{formatCurrency(valuationRange.min)}</span>
+                  <span>{formatCurrency(valuationRange.max)}</span>
+                </div>
+                <div className="valuation-range-slider">
+                  <div className="valuation-range-track" />
+                  <div
+                    className="valuation-range-active"
+                    style={{
+                      left: `${
+                        maxUnitPrice === minUnitPrice
+                          ? 0
+                          : ((valuationRange.min - minUnitPrice) / (maxUnitPrice - minUnitPrice)) * 100
+                      }%`,
+                      right: `${
+                        maxUnitPrice === minUnitPrice
+                          ? 0
+                          : 100 - ((valuationRange.max - minUnitPrice) / (maxUnitPrice - minUnitPrice)) * 100
+                      }%`,
+                    }}
                   />
-                  <span>{option.value}</span>
-                  <span className="filter-count">{option.count}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+                  <input
+                    type="range"
+                    min={minUnitPrice}
+                    max={maxUnitPrice}
+                    step="1"
+                    value={valuationRange.min}
+                    onChange={(event) => {
+                      const nextMin = Number(event.target.value);
+                      setValuationRange((currentRange) => ({
+                        min: Math.min(nextMin, currentRange.max),
+                        max: currentRange.max,
+                      }));
+                    }}
+                  />
+                  <input
+                    className="valuation-range-input valuation-range-input-max"
+                    type="range"
+                    min={minUnitPrice}
+                    max={maxUnitPrice}
+                    step="1"
+                    value={valuationRange.max}
+                    onChange={(event) => {
+                      const nextMax = Number(event.target.value);
+                      setValuationRange((currentRange) => ({
+                        min: currentRange.min,
+                        max: Math.max(nextMax, currentRange.min),
+                      }));
+                    }}
+                  />
+                </div>
+              </div>
+
+              <details className="more-filters">
+                <summary>More filters</summary>
+                {[
+                  ["Pallet #", palletOptions, selectedPallets, setSelectedPallets],
+                  ["Box Type", boxTypeOptions, selectedBoxTypes, setSelectedBoxTypes],
+                  ["Workflow Status", workflowStatusOptions, selectedWorkflowStatuses, setSelectedWorkflowStatuses],
+                  ["Expiration Date", expirationOptions, selectedExpiration, setSelectedExpiration],
+                  ["Time in warehouse", durationOptions, selectedDuration, setSelectedDuration],
+                ].map(([title, options, selected, setter]) => (
+                  <div className="filter-group" key={title}>
+                    <h4>{title}</h4>
+                    {options.map((option) => (
+                      <label key={option.value} className="filter-option">
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(option.value)}
+                          onChange={() => toggleFilter(setter, selected, option.value)}
+                        />
+                        <span>{option.value}</span>
+                        <span className="filter-count">{option.count}</span>
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </details>
             </aside>
           </>
         ) : null}
 
         <div className="inventory-results">
           <div className="table-wrap">
-            <table>
+            <table className="inventory-table">
               <thead>
                 <tr>
                   <th>
@@ -536,87 +706,42 @@ export default function TotalInventory({
                       disabled={selectableFilteredInventoryRows.length === 0}
                     />
                   </th>
-                  <th><span className="id-column-label">ID</span></th>
+                  <th>Supply</th>
                   <th>Status</th>
-                  <th>General Supply</th>
-                  <th>Exact Supply Name</th>
-                  <th>Expiration Date</th>
-                  <th>Quantity</th>
-                  <th>Per Unit Price</th>
-                  <th>Valuation</th>
+                  <th>Expiration</th>
+                  <th className="num">Quantity</th>
+                  <th className="num">Unit price</th>
+                  <th className="num">Valuation</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredInventoryRows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={[
-                      row.needsReview ? "inventory-row-review" : "",
-                      row.isPartiallyRequested ? "inventory-row-partial" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ") || undefined}
-                  >
-                    <td>
-                      {row.inventoryStatus === "Available" ? (
-                        <input
-                          type="checkbox"
-                          aria-label={`Select supply ${row.supplyId}`}
-                          checked={selectedInventoryIds.includes(row.id)}
-                          onChange={() => toggleInventorySelection(row)}
-                        />
-                      ) : (
-                        <span
-                          className="inventory-selection-unavailable"
-                          role="img"
-                          aria-label={`${row.inventoryStatus} supply cannot be selected`}
-                          title={`${row.inventoryStatus} supplies cannot be selected again`}
-                        >
-                          ×
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <div className="id-cell">
-                        <button
-                          type="button"
-                          className="info-icon-button"
-                          onClick={() => openDetailsModal(row)}
-                          aria-label={`Open details for supply ${row.supplyId}`}
-                        >
-                          ⓘ
-                        </button>
-                      </div>
-                    </td>
-                    <td>
-                      <span
-                        className={
-                          row.inventoryStatus === "Available"
-                            ? "status-pill inventory"
-                            : `status-pill ${row.inventoryStatus.toLowerCase()}`
-                        }
-                      >
-                        {row.inventoryStatus}
-                      </span>
-                    </td>
-                    <td>{row.generalSupply}</td>
-                    <td>{row.exactSupplyName}</td>
-                    <td>
-                      <div className="expiration-cell">
-                        <span>{row.expirationDate}</span>
-                        <span className={`expiration-pill ${row.expirationStatus.tone}`}>
-                          {row.expirationStatus.label}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatNumber(row.quantity)}</td>
-                    <td>{formatCurrency(row.unitPrice)}</td>
-                    <td>{formatCurrency(row.valuation)}</td>
-                  </tr>
-                ))}
+                {sections.map((section) => {
+                  const groups = groupByProduct(section.rows);
+                  return (
+                    <Fragment key={section.id}>
+                      {groupBy !== "none" ? (
+                        <tr className="section-row">
+                          <td colSpan="7">
+                            {section.color ? (
+                              <span className="legend-swatch" style={{ background: section.color }} aria-hidden="true" />
+                            ) : null}
+                            <strong>{section.label}</strong>
+                            <span className="section-count">
+                              {formatNumber(groups.length)} products ·{" "}
+                              {formatNumber(section.rows.reduce((total, row) => total + (row.quantity || 0), 0))} units
+                            </span>
+                          </td>
+                        </tr>
+                      ) : null}
+                      {groups.map((group) => (
+                        <Fragment key={group.key}>{renderGroup(group, section.id)}</Fragment>
+                      ))}
+                    </Fragment>
+                  );
+                })}
                 {filteredInventoryRows.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="empty-state-cell">
+                    <td colSpan="7" className="empty-state-cell">
                       No inventory items matched the current filters.
                     </td>
                   </tr>

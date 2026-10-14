@@ -49,17 +49,13 @@
   font-family: var(--bp-body);
   color: var(--bp-ink);
   background: var(--bp-sheet);
-}
-
-/* Figures line up in columns without switching to a monospace face --
+}/* Figures line up in columns without switching to a monospace face --
    Inter's tabular figures are enough and keep the page looking clean. */
 .metric-value,
 .pill,
 .filter-count,
 .shipment-line-pricing span,
 .expiration-pill,
-.pallet-card-copy span,
-.pallet-box-pill,
 .shipment-bar-chart-y-axis span,
 .shipment-bar-chart-count,
 .shipment-line-chart-y-axis span,

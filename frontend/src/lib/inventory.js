@@ -25,6 +25,7 @@ export function buildInventoryRows(items) {
     expirationDaysLeft: daysUntil(item.expiration_date || null),
     expirationStatus: expirationStatus(daysUntil(item.expiration_date || null)),
     warehouseDate: item.warehouse_date || null,
+    expiryTier: expiryTierId(daysUntil(item.expiration_date || null)),
     expirationFilter: expirationBucket(item.expiration_date || null),
     durationFilter: durationBucket(item.warehouse_date || null),
     valuation: item.total_value || 0,
@@ -112,4 +113,81 @@ export function valueBucketForUnitPrice(unitPrice) {
     return "$100-$200";
   }
   return "$200+";
+}
+
+// ---- Product grouping -------------------------------------------------------
+
+const SIZE_WORDS = "xxxs|xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|small|medium|large|x-?large|extra[ -]?large|x-?small|extra[ -]?small";
+const NUM = "\\d+(?:\\.\\d+)?";
+const UNIT = "(?:mm|cm|in|inch|ml|cc|l|oz|g|mg|fr|french|ga|cm2|\"|')";
+// A trailing size: a size word, a number with optional unit or gauge (7.5, 18G, 10 mL),
+// or a dimension (4x4, 4"x4", 2 x 3 in), optionally prefixed by "size" and separated by , - / or (...).
+const TRAILING_SIZE = new RegExp(
+  "(?:[\\s,/]+|\\s*[\\-\\u2013]\\s+|\\s*\\()" +
+    "(?:size\\s+)?(?:" +
+    `${NUM}\\s*${UNIT}?\\s*[x\u00d7]\\s*${NUM}\\s*${UNIT}?(?:\\s*[x\u00d7]\\s*${NUM}\\s*${UNIT}?)?` +
+    `|${NUM}\\s*${UNIT}?` +
+    `|(?:${SIZE_WORDS})` +
+    ")\\)?\\s*$",
+  "i"
+);
+
+// "Nitrile exam gloves M" -> "Nitrile exam gloves". Never returns an empty string:
+// if the whole name is a size token the name is kept as is.
+export function productName(name) {
+  let result = String(name || "").trim();
+  for (let guard = 0; guard < 4; guard += 1) {
+    const next = result.replace(TRAILING_SIZE, "").replace(/[\s,\-\u2013/]+$/, "").trim();
+    if (!next || next === result) {
+      break;
+    }
+    result = next;
+  }
+  return result || String(name || "").trim();
+}
+
+export function productKey(name) {
+  return productName(name).toLowerCase().replace(/\s+/g, " ");
+}
+
+// Groups lot rows under their product, sorted alphabetically. Each group carries
+// the totals the collapsed row needs.
+export function groupByProduct(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = productKey(row.exactSupplyName);
+    if (!groups.has(key)) {
+      groups.set(key, { key, name: productName(row.exactSupplyName), category: row.category, rows: [] });
+    }
+    groups.get(key).rows.push(row);
+  }
+
+  return [...groups.values()]
+    .map((group) => {
+      const dated = group.rows.map((row) => row.expirationDaysLeft).filter((days) => days !== null);
+      return {
+        ...group,
+        rows: sortItemsByExpiration(group.rows),
+        totalQuantity: group.rows.reduce((total, row) => total + (row.quantity || 0), 0),
+        totalValue: group.rows.reduce((total, row) => total + (row.valuation || 0), 0),
+        soonestDaysLeft: dated.length ? Math.min(...dated) : null,
+      };
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+export function expiryTierId(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) {
+    return "none";
+  }
+  if (daysLeft <= 0) {
+    return "expired";
+  }
+  if (daysLeft <= 30) {
+    return "d30";
+  }
+  if (daysLeft <= 90) {
+    return "d90";
+  }
+  return "ok";
 }

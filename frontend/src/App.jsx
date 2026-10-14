@@ -3,11 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import StockAlerts from "./StockAlerts.jsx";
 import Requests from "./Requests.jsx";
 import SyncCell from "./SyncCell.jsx";
-import { API_BASE, PALLET_MAP_STORAGE_KEY, tabs } from "./lib/config.js";
+import { API_BASE, tabs } from "./lib/config.js";
+import { useAllocations } from "./lib/shipments.js";
 import { averageShipmentDays, parseLocalDate, todayIsoDate } from "./lib/dates.js";
 import { formatNumber } from "./lib/format.js";
 import { buildInventoryRows, inventoryStatusForItem } from "./lib/inventory.js";
-import { canPlacePallet, clampPalletPosition, mergePalletLayout } from "./lib/palletMap.js";
 import { normalizeRequestedQuantity, normalizeShipmentType, requestedShipmentItemValue } from "./lib/shipments.js";
 import { useShipments } from "./lib/useShipments.js";
 import { toLegacyShipments } from "./lib/shipmentsLogic.js";
@@ -18,10 +18,11 @@ import InventoryKpis from "./tabs/InventoryKpis.jsx";
 import Shipments from "./tabs/Shipments.jsx";
 import ShipmentKpis from "./tabs/ShipmentKpis.jsx";
 import ShipmentModals from "./components/ShipmentModals.jsx";
-import { InventoryKpiModals, InventoryDetailsModal } from "./components/InventoryModals.jsx";
+import { InventoryDetailsModal } from "./components/InventoryModals.jsx";
 import ShipmentKpiModals from "./components/ShipmentKpiModals.jsx";
 
 export default function App() {
+  const { allocations, byItem: allocationsByItem } = useAllocations();
   const [activeTab, setActiveTab] = useState("inventory");
   const [activeShipmentSubtab, setActiveShipmentSubtab] = useState("current");
   const [activeShipmentKpiSubtab, setActiveShipmentKpiSubtab] = useState("overview");
@@ -34,6 +35,7 @@ export default function App() {
   const [selectedExpiration, setSelectedExpiration] = useState([]);
   const [selectedDuration, setSelectedDuration] = useState([]);
   const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedExpiryTiers, setSelectedExpiryTiers] = useState([]);
   const [selectedPallets, setSelectedPallets] = useState([]);
   const [selectedBoxTypes, setSelectedBoxTypes] = useState([]);
   const [selectedWorkflowStatuses, setSelectedWorkflowStatuses] = useState([]);
@@ -64,21 +66,8 @@ export default function App() {
   const [detailsItem, setDetailsItem] = useState(null);
   const [shipmentDate, setShipmentDate] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
-  const [activeExpirationPieLabel, setActiveExpirationPieLabel] = useState(null);
-  const [activeDurationPieLabel, setActiveDurationPieLabel] = useState(null);
-  const [activeCategoryPieLabel, setActiveCategoryPieLabel] = useState(null);
-  const [activeValuePieLabel, setActiveValuePieLabel] = useState(null);
-  const [activeBoxCategoryPieLabel, setActiveBoxCategoryPieLabel] = useState(null);
-  const [activeSupplyStatusPieLabel, setActiveSupplyStatusPieLabel] = useState(null);
-  const [isAllInventoryKpisOpen, setIsAllInventoryKpisOpen] = useState(false);
   const [isAllShipmentKpisOpen, setIsAllShipmentKpisOpen] = useState(false);
   const [isAllShipmentFlowMetricsOpen, setIsAllShipmentFlowMetricsOpen] = useState(false);
-  const [isEditingPalletMap, setIsEditingPalletMap] = useState(false);
-  const [savedPalletLayout, setSavedPalletLayout] = useState({});
-  const [draftPalletLayout, setDraftPalletLayout] = useState({});
-  const [draggingPallet, setDraggingPallet] = useState(null);
-  const [activePalletId, setActivePalletId] = useState(null);
-  const palletMapRef = useRef(null);
   const inventoryShipmentButtonRef = useRef(null);
   async function refreshDashboard(showLoader = false) {
     try {
@@ -153,20 +142,6 @@ export default function App() {
     observer.observe(button);
     return () => observer.disconnect();
   }, [activeTab, loading, error]);
-
-
-
-
-  useEffect(() => {
-    try {
-      const storedLayout = window.localStorage.getItem(PALLET_MAP_STORAGE_KEY);
-      if (storedLayout) {
-        setSavedPalletLayout(JSON.parse(storedLayout));
-      }
-    } catch (err) {
-      console.error("Unable to restore pallet layout", err);
-    }
-  }, []);
   const currentShipments = shipments.filter((shipment) => !shipment.isCompleted);
   const pastShipments = shipments.filter((shipment) => shipment.isCompleted);
   const currentShipmentRequestTotals = shipments
@@ -215,115 +190,12 @@ export default function App() {
   const allBoxTypes = [...new Set(inventoryRowsWithStatus.map((row) => row.boxType).filter(Boolean))].sort(
     (left, right) => left.localeCompare(right)
   );
-  const palletSummaries = Object.values(
-    inventoryRowsWithShipmentStatus
-      .filter((row) => row.palletNumber && row.palletNumber !== "Unassigned")
-      .reduce((accumulator, row) => {
-        const palletId = String(row.palletNumber);
-
-        if (!accumulator[palletId]) {
-          accumulator[palletId] = {
-            id: palletId,
-            label: `Pallet ${palletId}`,
-            rows: [],
-            totalSupplies: 0,
-            boxKeys: new Set(),
-            boxTypeCounts: {},
-          };
-        }
-
-        accumulator[palletId].rows.push(row);
-        accumulator[palletId].totalSupplies += Number(row.quantity) || 0;
-        accumulator[palletId].boxKeys.add(`${row.boxType}|${row.boxNumber}`);
-
-        const boxKey = `${row.boxType}|${row.boxNumber}`;
-        if (!accumulator[palletId].seenBoxKeys) {
-          accumulator[palletId].seenBoxKeys = new Set();
-        }
-        if (!accumulator[palletId].seenBoxKeys.has(boxKey)) {
-          accumulator[palletId].seenBoxKeys.add(boxKey);
-          accumulator[palletId].boxTypeCounts[row.boxType] =
-            (accumulator[palletId].boxTypeCounts[row.boxType] || 0) + 1;
-        }
-
-        return accumulator;
-      }, {})
-  )
-    .map((summary) => ({
-      ...summary,
-      boxBreakdown: allBoxTypes.map((boxType) => ({
-        boxType,
-        count: summary.boxTypeCounts[boxType] || 0,
-      })),
-      totalBoxes: summary.boxKeys.size,
-    }))
-    .sort((left, right) => Number(left.id) - Number(right.id));
-  const palletIdKey = palletSummaries.map((summary) => summary.id).join("|");
   const unitPriceValues = inventoryRowsWithStatus.map((row) => row.unitPrice);
   const minUnitPrice = unitPriceValues.length > 0 ? Math.min(...unitPriceValues) : 0;
   const maxUnitPrice = unitPriceValues.length > 0 ? Math.max(...unitPriceValues) : 0;
   useEffect(() => {
     setValuationRange({ min: minUnitPrice, max: maxUnitPrice });
   }, [minUnitPrice, maxUnitPrice]);
-  useEffect(() => {
-    const nextLayout = mergePalletLayout(savedPalletLayout, palletSummaries.map((summary) => summary.id));
-    if (JSON.stringify(nextLayout) !== JSON.stringify(savedPalletLayout)) {
-      setSavedPalletLayout(nextLayout);
-    }
-
-    if (isEditingPalletMap) {
-      const nextDraftLayout = mergePalletLayout(
-        draftPalletLayout,
-        palletSummaries.map((summary) => summary.id)
-      );
-      if (JSON.stringify(nextDraftLayout) !== JSON.stringify(draftPalletLayout)) {
-        setDraftPalletLayout(nextDraftLayout);
-      }
-    }
-  }, [palletIdKey, savedPalletLayout, draftPalletLayout, isEditingPalletMap]);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(PALLET_MAP_STORAGE_KEY, JSON.stringify(savedPalletLayout));
-    } catch (err) {
-      console.error("Unable to persist pallet layout", err);
-    }
-  }, [savedPalletLayout]);
-  useEffect(() => {
-    if (!draggingPallet || !isEditingPalletMap) {
-      return undefined;
-    }
-
-    function handlePointerMove(event) {
-      const canvasBounds = palletMapRef.current?.getBoundingClientRect();
-      if (!canvasBounds) {
-        return;
-      }
-
-      const unclampedPosition = {
-        x: event.clientX - canvasBounds.left - draggingPallet.offsetX,
-        y: event.clientY - canvasBounds.top - draggingPallet.offsetY,
-      };
-      const nextPosition = clampPalletPosition(unclampedPosition);
-
-      setDraftPalletLayout((currentLayout) =>
-        canPlacePallet(currentLayout, draggingPallet.palletId, nextPosition)
-          ? { ...currentLayout, [draggingPallet.palletId]: nextPosition }
-          : currentLayout
-      );
-    }
-
-    function handlePointerUp() {
-      setDraggingPallet(null);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [draggingPallet, isEditingPalletMap]);
   function jumpToPastShipment(shipmentId, shipmentName) {
     setActiveTab("shipments");
     setShipmentFocus({ id: shipmentId, name: shipmentName || "", nonce: Date.now() });
@@ -332,6 +204,7 @@ export default function App() {
     setSelectedExpiration([]);
     setSelectedDuration([]);
     setSelectedCategories([]);
+    setSelectedExpiryTiers([]);
     setSelectedPallets([]);
     setSelectedBoxTypes([]);
     setSelectedWorkflowStatuses([]);
@@ -359,14 +232,6 @@ export default function App() {
   function openDetailsModal(item) {
     setDetailsItem(item);
   }
-  const expiredInventoryUnits = inventoryRowsWithStatus
-    .filter((row) => row.expirationDaysLeft !== null && row.expirationDaysLeft <= 0)
-    .reduce((total, row) => total + (row.quantity || 0), 0);
-  const expiringSoonInventoryUnits = inventoryRowsWithStatus
-    .filter((row) => row.expirationDaysLeft !== null && row.expirationDaysLeft > 0 && row.expirationDaysLeft <= 90)
-    .reduce((total, row) => total + (row.quantity || 0), 0);
-  const averageBoxesPerPallet =
-    (kpis?.pallet_count ?? 0) > 0 ? (kpis.box_count ?? 0) / kpis.pallet_count : 0;
   const localShipments = shipments.filter(
     (shipment) => normalizeShipmentType(shipment.shipmentType) === "Local"
   );
@@ -568,6 +433,7 @@ export default function App() {
 
       {!loading && !error && activeTab === "inventory" ? (
 <TotalInventory
+          allocationsByItem={allocationsByItem}
           clearInventoryFilters={clearInventoryFilters}
           currentShipments={currentShipments}
           inventoryRowsWithShipmentStatus={inventoryRowsWithShipmentStatus}
@@ -583,6 +449,7 @@ export default function App() {
           selectedCategories={selectedCategories}
           selectedDuration={selectedDuration}
           selectedExpiration={selectedExpiration}
+          selectedExpiryTiers={selectedExpiryTiers}
           selectedInventoryIds={selectedInventoryIds}
           selectedPallets={selectedPallets}
           selectedWorkflowStatuses={selectedWorkflowStatuses}
@@ -599,16 +466,13 @@ export default function App() {
           setSelectedCategories={setSelectedCategories}
           setSelectedDuration={setSelectedDuration}
           setSelectedExpiration={setSelectedExpiration}
+          setSelectedExpiryTiers={setSelectedExpiryTiers}
           setSelectedInventoryIds={setSelectedInventoryIds}
           setSelectedPallets={setSelectedPallets}
           setSelectedShipmentId={setSelectedShipmentId}
           setSelectedWorkflowStatuses={setSelectedWorkflowStatuses}
-          setShowAvailableItems={setShowAvailableItems}
-          setShowNonAvailableItems={setShowNonAvailableItems}
           setValuationRange={setValuationRange}
-          showAvailableItems={showAvailableItems}
           showFloatingInventoryAction={showFloatingInventoryAction}
-          showNonAvailableItems={showNonAvailableItems}
           valuationRange={valuationRange}
         />
       ) : null}
@@ -619,48 +483,19 @@ export default function App() {
 
       {!loading && !error && activeTab === "kpis" ? (
 <InventoryKpis
-          activeBoxCategoryPieLabel={activeBoxCategoryPieLabel}
-          activeCategoryPieLabel={activeCategoryPieLabel}
-          activeDurationPieLabel={activeDurationPieLabel}
-          activeExpirationPieLabel={activeExpirationPieLabel}
-          activeSupplyStatusPieLabel={activeSupplyStatusPieLabel}
-          activeValuePieLabel={activeValuePieLabel}
-          averageBoxesPerPallet={averageBoxesPerPallet}
+          allocations={allocations}
+          allocationsByItem={allocationsByItem}
           clearInventoryFilters={clearInventoryFilters}
-          draftPalletLayout={draftPalletLayout}
-          expiredInventoryUnits={expiredInventoryUnits}
-          expiringSoonInventoryUnits={expiringSoonInventoryUnits}
           inventoryRowsWithShipmentStatus={inventoryRowsWithShipmentStatus}
-          inventoryRowsWithStatus={inventoryRowsWithStatus}
-          isEditingPalletMap={isEditingPalletMap}
-          items={items}
           kpis={kpis}
-          maxUnitPrice={maxUnitPrice}
-          minUnitPrice={minUnitPrice}
-          palletMapRef={palletMapRef}
-          palletSummaries={palletSummaries}
-          savedPalletLayout={savedPalletLayout}
-          setActiveBoxCategoryPieLabel={setActiveBoxCategoryPieLabel}
-          setActiveCategoryPieLabel={setActiveCategoryPieLabel}
-          setActiveDurationPieLabel={setActiveDurationPieLabel}
-          setActiveExpirationPieLabel={setActiveExpirationPieLabel}
-          setActivePalletId={setActivePalletId}
-          setActiveSupplyStatusPieLabel={setActiveSupplyStatusPieLabel}
           setActiveTab={setActiveTab}
-          setActiveValuePieLabel={setActiveValuePieLabel}
-          setDraftPalletLayout={setDraftPalletLayout}
-          setDraggingPallet={setDraggingPallet}
-          setIsAllInventoryKpisOpen={setIsAllInventoryKpisOpen}
-          setIsEditingPalletMap={setIsEditingPalletMap}
           setIsInventoryFiltersOpen={setIsInventoryFiltersOpen}
-          setSavedPalletLayout={setSavedPalletLayout}
-          setSelectedBoxTypes={setSelectedBoxTypes}
           setSelectedCategories={setSelectedCategories}
           setSelectedDuration={setSelectedDuration}
-          setSelectedExpiration={setSelectedExpiration}
+          setSelectedExpiryTiers={setSelectedExpiryTiers}
           setSelectedInventoryIds={setSelectedInventoryIds}
+          setSelectedPallets={setSelectedPallets}
           setSelectedWorkflowStatuses={setSelectedWorkflowStatuses}
-          setValuationRange={setValuationRange}
         />
       ) : null}
 
@@ -722,19 +557,7 @@ export default function App() {
         />
       ) : null}
 
-<InventoryKpiModals
-          activePalletId={activePalletId}
-          averageBoxesPerPallet={averageBoxesPerPallet}
-          expiredInventoryUnits={expiredInventoryUnits}
-          expiringSoonInventoryUnits={expiringSoonInventoryUnits}
-          inventoryRowsWithShipmentStatus={inventoryRowsWithShipmentStatus}
-          inventoryRowsWithStatus={inventoryRowsWithStatus}
-          isAllInventoryKpisOpen={isAllInventoryKpisOpen}
-          kpis={kpis}
-          palletSummaries={palletSummaries}
-          setActivePalletId={setActivePalletId}
-          setIsAllInventoryKpisOpen={setIsAllInventoryKpisOpen}
-        />
+
 
 <ShipmentKpiModals
           currentShipments={currentShipments}
