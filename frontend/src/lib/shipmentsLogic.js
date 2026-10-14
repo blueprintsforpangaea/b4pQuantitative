@@ -141,56 +141,20 @@ export function normalizeShipmentType(value) {
   return value === "National" ? "International" : value || "Local";
 }
 
-// Old localStorage shipments -> body for POST /shipments/import.
+// Old localStorage shipments -> body for POST /shipments/import. The API maps the old field names
+// itself, so the raw objects are sent; only empty never-used drafts are left out.
 export function buildImportBody(oldShipments, oldNonInventory) {
+  const list = (value) => (Array.isArray(value) ? value.filter((entry) => entry && typeof entry === "object") : []);
   return {
-    shipments: (Array.isArray(oldShipments) ? oldShipments : [])
-      .filter((shipment) => (shipment.items || []).length > 0 || shipment.isCompleted)
-      .map((shipment) => {
-        const items = shipment.items || [];
-        let stage = "planned";
-        if (shipment.isCompleted) {
-          stage = shipment.pastShipmentStatus === "Delivered" ? "delivered" : "shipped";
-        } else if (items.length > 0 && items.every((item) => item.isConsolidated)) {
-          stage = "consolidated";
-        } else if (items.some((item) => item.isConsolidated)) {
-          stage = "pulling";
-        }
-        return {
-          id: shipment.id,
-          name: shipment.recipientName || "Shipment",
-          recipient: shipment.recipientName || "",
-          shipment_type: normalizeShipmentType(shipment.shipmentType),
-          shipping_method: shipment.transportType || "",
-          blueprints_contact: shipment.pointOfContact || "",
-          notes: shipment.notes || "",
-          stage,
-          ship_date: shipment.shippedAt || shipment.shipmentDate || null,
-          delivered_date: stage === "delivered" ? shipment.deliveryDate || null : null,
-          created_at: shipment.createdAt || null,
-          request_ids: [],
-          lines: items.map((item) => ({
-            item_id: item.id === undefined || item.id === null ? null : String(item.id),
-            name: item.name,
-            quantity: Number(item.requestedQuantity) || Number(item.quantity) || 1,
-            unit_price: Number(item.unitPrice) || 0,
-            lot_number: item.lotNumber || null,
-            expiration_date: item.expirationDate || null,
-            picked: Boolean(item.isConsolidated),
-            consolidated: Boolean(item.isConsolidated),
-          })),
-        };
-      }),
-    non_inventory: (Array.isArray(oldNonInventory) ? oldNonInventory : []).map((shipment) => ({
-      id: shipment.id,
-      clinicName: shipment.clinicName,
-      pointOfContact: shipment.pointOfContact || "",
-      shipmentType: normalizeShipmentType(shipment.shipmentType),
-      shippedAt: shipment.shippedAt || shipment.createdAt || null,
-      valuation: Number(shipment.valuation) || 0,
-      createdAt: shipment.createdAt || null,
-    })),
+    shipments: list(oldShipments).filter((shipment) => (shipment.items || []).length > 0 || shipment.isCompleted),
+    non_inventory: list(oldNonInventory),
   };
+}
+
+// Newest first: active by creation time, past by ship date.
+export function sortShipments(shipments) {
+  const key = (shipment) => (isActive(shipment) ? shipment.created_at || "" : `${shipment.ship_date || (shipment.created_at || "").slice(0, 10)}|${shipment.created_at || ""}`);
+  return [...shipments].sort((a, b) => key(b).localeCompare(key(a)));
 }
 
 // API shipments -> the shapes the older KPI / inventory-status code expects.

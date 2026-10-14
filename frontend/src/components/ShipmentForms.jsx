@@ -68,7 +68,7 @@ export function NewShipmentModal({ onClose, onCreate }) {
 }
 
 // Shipped without inventory rows: header plus a dollar value and optional unit count.
-export function NonInventoryModal({ onClose, onCreate }) {
+export function NonInventoryModal({ onClose, onCreate, onPatch }) {
   const [form, setForm] = useState({ recipient: "", blueprints_contact: "", shipment_type: "Local", ship_date: new Date().toISOString().slice(0, 10), value: "", unit_count: "" });
   const [error, setError] = useState("");
   const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }));
@@ -81,10 +81,16 @@ export function NonInventoryModal({ onClose, onCreate }) {
     }
     const result = await onCreate({
       name: form.recipient.trim(), recipient: form.recipient.trim(), shipment_type: form.shipment_type, blueprints_contact: form.blueprints_contact,
-      ship_date: form.ship_date, kind: "non_inventory", value: Number(form.value), unit_count: form.unit_count === "" ? null : Number(form.unit_count), stage: "shipped", lines: [],
+      ship_date: form.ship_date, kind: "non_inventory", value: Number(form.value), unit_count: form.unit_count === "" ? null : Number(form.unit_count), lines: [],
     });
-    if (result.ok) onClose();
-    else setError(result.error);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    // A new shipment starts as planned; with no lines, moving it to shipped takes no stock.
+    const moved = await onPatch(result.result.id, { stage: "shipped" });
+    if (moved.ok) onClose();
+    else setError(moved.error);
   }
 
   return (

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   autoStageAfterTick,
   buildImportBody,
+  sortShipments,
   formatLocation,
   groupLinesByProduct,
   parseRequestIds,
@@ -76,18 +77,25 @@ describe("totals and request ids", () => {
 
 describe("legacy import and adapter", () => {
   const old = [
-    { id: "s1", recipientName: "Test Clinic", shipmentType: "National", pointOfContact: "Sam Example", items: [
-      { id: "i1", name: "Gloves", quantity: 40, requestedQuantity: 25, unitPrice: 0.5, isConsolidated: true } ] },
-    { id: "s2", recipientName: "Done Clinic", isCompleted: true, pastShipmentStatus: "Delivered", deliveryDate: "2026-03-20", shippedAt: "2026-03-06", items: [] },
+    { id: "s1", recipientName: "Test Clinic", shipmentType: "National", pointOfContact: "Sam Example", items: [{ id: "i1", name: "Gloves", quantity: 40 }] },
+    { id: "s2", recipientName: "Done Clinic", isCompleted: true, pastShipmentStatus: "Delivered", items: [] },
     { id: "s3", recipientName: "Empty planned", items: [] },
   ];
-  it("maps stage, contact, quantities and drops empty drafts", () => {
-    const body = buildImportBody(old, [{ id: "n1", clinicName: "Clinic Z", valuation: 120, shippedAt: "2026-02-01" }]);
-    expect(body.shipments).toHaveLength(2);
-    expect(body.shipments[0]).toMatchObject({ id: "s1", stage: "consolidated", shipment_type: "International", blueprints_contact: "Sam Example" });
-    expect(body.shipments[0].lines[0]).toMatchObject({ quantity: 25, unit_price: 0.5 });
-    expect(body.shipments[1]).toMatchObject({ stage: "delivered", delivered_date: "2026-03-20" });
-    expect(body.non_inventory[0]).toMatchObject({ clinicName: "Clinic Z", valuation: 120 });
+  it("sends raw old objects and drops only empty never-used drafts", () => {
+    const body = buildImportBody(old, [{ id: "n1", clinicName: "Clinic Z", valuation: 120 }, null]);
+    expect(body.shipments.map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect(body.shipments[0]).toBe(old[0]);
+    expect(body.non_inventory).toHaveLength(1);
+    expect(buildImportBody("bad", undefined)).toEqual({ shipments: [], non_inventory: [] });
+  });
+  it("sorts newest first", () => {
+    const sorted = sortShipments([
+      { id: "a", stage: "planned", created_at: "2026-01-01T00:00:00Z" },
+      { id: "b", stage: "planned", created_at: "2026-02-01T00:00:00Z" },
+      { id: "c", stage: "shipped", ship_date: "2026-03-01", created_at: "2025-01-01T00:00:00Z" },
+      { id: "d", stage: "shipped", ship_date: "2026-04-01", created_at: "2025-01-01T00:00:00Z" },
+    ]);
+    expect(sorted.map((s) => s.id)).toEqual(["d", "c", "b", "a"]);
   });
   it("adapts API shipments for KPI code", () => {
     const { shipments, nonInventoryShipments } = toLegacyShipments([

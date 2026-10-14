@@ -43,4 +43,17 @@ describe("mock shipments API follows the contract", () => {
     expect(await api.importOld(body)).toMatchObject({ created: 0, skipped: 1 });
     expect((await api.get("n1")).totals.value).toBe(50);
   });
+
+  it("imports raw old shipments, keeping vanished items as free-text lines", async () => {
+    const api = createMockApi(inventory);
+    const result = await api.importOld({
+      shipments: [{ id: "old-1", recipientName: "Test Clinic", shipmentType: "National", pointOfContact: "Sam Example", isCompleted: true, pastShipmentStatus: "Delivered", deliveryDate: "2026-03-20",
+        items: [{ id: "gone", name: "Old gloves", quantity: 9, requestedQuantity: 4, unitPrice: 0.5 }] }],
+      non_inventory: [],
+    });
+    expect(result).toMatchObject({ created: 1, skipped: 0 });
+    const imported = await api.get("old-1");
+    expect(imported).toMatchObject({ stage: "delivered", shipment_type: "International", blueprints_contact: "Sam Example" });
+    expect(imported.lines[0]).toMatchObject({ item_id: null, quantity: 4, name: "Old gloves" });
+  });
 });

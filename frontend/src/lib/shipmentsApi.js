@@ -249,8 +249,20 @@ export function createMockApi(inventorySource = [], seed = []) {
       shipments.set(old.id, { id: old.id, name: old.clinicName, recipient: old.clinicName, shipment_type: old.shipmentType, shipping_method: "", blueprints_contact: old.pointOfContact, notes: "", stage: "shipped", ship_date: old.shippedAt, delivered_date: null, request_ids: [], kind: "non_inventory", unit_count: null, value: old.valuation, created_at: old.createdAt || new Date().toISOString(), updated_at: new Date().toISOString(), lines: [] });
       return;
     }
-    const { lines, ...header } = old;
-    shipments.set(old.id, { request_ids: [], kind: "inventory", unit_count: null, value: null, delivered_date: null, ...header, created_at: old.created_at || new Date().toISOString(), updated_at: new Date().toISOString(), lines: (lines || []).map((l) => ({ id: String(++counter), ...l, item_id: l.item_id && stock.has(String(l.item_id)) ? l.item_id : null })) });
+    // Raw old localStorage shipment (same field mapping the real API applies).
+    const items = old.items || [];
+    const stage = old.isCompleted
+      ? (old.pastShipmentStatus === "Delivered" ? "delivered" : "shipped")
+      : items.length > 0 && items.every((item) => item.isConsolidated) ? "consolidated" : items.some((item) => item.isConsolidated) ? "pulling" : "planned";
+    shipments.set(old.id, {
+      id: old.id, name: old.recipientName || "Untitled shipment", recipient: old.recipientName || "", shipment_type: old.shipmentType === "National" ? "International" : old.shipmentType || "",
+      shipping_method: old.transportType || "", blueprints_contact: old.pointOfContact || "", notes: old.notes || "", stage, ship_date: old.shipmentDate || null,
+      delivered_date: old.deliveryDate || null, request_ids: [], kind: "inventory", unit_count: null, value: null, created_at: old.createdAt || new Date().toISOString(), updated_at: new Date().toISOString(),
+      lines: items.map((item) => {
+        const known = item.id !== undefined && stock.has(String(item.id));
+        return { id: String(++counter), item_id: known ? String(item.id) : null, quantity: Number(item.requestedQuantity) || Number(item.quantity) || 1, picked: Boolean(item.isConsolidated), consolidated: Boolean(item.isConsolidated), name: item.name || "Item", unit_price: Number(item.unitPrice) || 0, lot_number: item.lotNumber || null, expiration_date: item.expirationDate || null };
+      }),
+    });
   }
 }
 

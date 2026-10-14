@@ -4,7 +4,7 @@ import ShipmentCard from "../components/ShipmentCard.jsx";
 import { LegacyImportBanner, UnlockBar } from "../components/ShipmentImport.jsx";
 import ShipmentPrint from "../components/ShipmentPrint.jsx";
 import { readAdminToken } from "../lib/shipmentsApi.js";
-import { isActive } from "../lib/shipmentsLogic.js";
+import { isActive, sortShipments } from "../lib/shipmentsLogic.js";
 
 const PAST_PAGE = 50;
 
@@ -38,7 +38,7 @@ export default function Shipments({ items, state, focus = null }) {
   }, [focus]);
 
   const term = search.trim().toLowerCase();
-  const visible = shipments.filter((shipment) => (subtab === "active") === isActive(shipment) && matches(shipment, term) && (typeFilter === "All" || shipment.shipment_type === typeFilter));
+  const visible = sortShipments(shipments).filter((shipment) => (subtab === "active") === isActive(shipment) && matches(shipment, term) && (typeFilter === "All" || shipment.shipment_type === typeFilter));
   const counts = { active: shipments.filter(isActive).length, past: shipments.length - shipments.filter(isActive).length };
   const shown = subtab === "past" ? visible.slice(0, pastLimit) : visible;
 
@@ -113,7 +113,7 @@ export default function Shipments({ items, state, focus = null }) {
       ) : null}
 
       {modal === "new" ? <NewShipmentModal onClose={() => setModal(null)} onCreate={state.create} /> : null}
-      {modal === "non-inventory" ? <NonInventoryModal onClose={() => setModal(null)} onCreate={state.create} /> : null}
+      {modal === "non-inventory" ? <NonInventoryModal onClose={() => setModal(null)} onCreate={state.create} onPatch={state.patch} /> : null}
       {modal?.addTo ? <AddItemsModal items={items} shipments={shipments} shipmentId={modal.addTo} onClose={() => setModal(null)} onSetLines={state.setLines} onCreate={state.create} /> : null}
       <ShipmentPrint shipment={printing} />
     </section>
