@@ -1,13 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import requests
 import csv
 import re
 import os
+import hmac
+import time
 import json
+import logging
 from io import StringIO
 
 try:
@@ -17,14 +20,29 @@ except ImportError:  # pragma: no cover - optional until credentials are configu
     gspread = None
     Credentials = None
 
+try:
+    from . import db, shipments
+    from .alerts import build_alerts
+    from .exports import add_stock_warnings, expiring_csv, packing_list_csv
+except ImportError:  # run as `uvicorn app:app` from inside backend/
+    import db
+    import shipments
+    from alerts import build_alerts
+    from exports import add_stock_warnings, expiring_csv, packing_list_csv
+
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Inventory Backend API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        o.strip()
+        for o in os.getenv("ALLOWED_ORIGINS", "https://b4p-quantitative.vercel.app,http://localhost:5173").split(",")
+        if o.strip()
+    ],
+    allow_methods=["GET", "POST", "PATCH", "PUT"],
+    allow_headers=["Content-Type", "X-Admin-Token"],
 )
 
 # ==============================
@@ -89,6 +107,15 @@ class Item(BaseModel):
     pallet_number: int
     category_box: str
     box_number: int
+    lot_number: Optional[str] = None
+
+    @field_validator("image_url")
+    @classmethod
+    def only_web_links(cls, value):
+        """Photo links end up in an href; anything but http(s) (e.g. javascript:) is dropped."""
+        if value and not re.match(r"^https?://", value.strip(), re.IGNORECASE):
+            return None
+        return value
 
 
 class KPIResponse(BaseModel):
@@ -110,7 +137,7 @@ class KPIResponse(BaseModel):
 
 
 class QuantityUpdateRequest(BaseModel):
-    quantity: int
+    quantity: int = Field(ge=0, lt=1_000_000)
 
 
 class QuantityUpdateResponse(BaseModel):
@@ -209,7 +236,7 @@ def normalize_item_id(row: Dict[str, Any], fallback_index: int) -> str:
     return str(fallback_index)
 
 
-def get_gspread_worksheet():
+def get_gspread_worksheet(gid: str = SHEET_GID):
     if gspread is None or Credentials is None:
         raise HTTPException(
             status_code=503,
@@ -241,10 +268,10 @@ def get_gspread_worksheet():
         client = gspread.authorize(credentials)
         spreadsheet = client.open_by_key(SHEET_ID)
         try:
-            return spreadsheet.get_worksheet_by_id(int(SHEET_GID))
+            return spreadsheet.get_worksheet_by_id(int(gid))
         except AttributeError:
             for worksheet in spreadsheet.worksheets():
-                if str(worksheet.id) == str(SHEET_GID):
+                if str(worksheet.id) == str(gid):
                     return worksheet
             raise HTTPException(status_code=500, detail="Configured worksheet could not be found.")
     except HTTPException:
@@ -254,8 +281,8 @@ def get_gspread_worksheet():
 
 
 def update_sheet_quantity(item_id: str, quantity: int) -> QuantityUpdateResponse:
-    if quantity <= 0:
-        raise HTTPException(status_code=400, detail="Quantity must be greater than 0.")
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="Quantity cannot be negative.")
 
     worksheet = get_gspread_worksheet()
     records = worksheet.get_all_records()
@@ -361,12 +388,58 @@ def fetch_items_from_sheet() -> List[Item]:
                 pallet_number=parse_int(row.get("Pallet Number"), default=0),
                 category_box=(row.get("Box Category") or "").strip() or "Unassigned",
                 box_number=parse_int(row.get("Box Number"), default=0),
+                lot_number=(row.get("Lot Number") or "").strip() or None,
             )
             items.append(item)
         except Exception as e:
             print(f"Error parsing row: {row} -> {e}")
 
     return items
+
+
+_items_cache: Dict[str, Any] = {"at": 0.0, "dsn": None, "items": None}
+
+
+def clear_items_cache() -> None:
+    _items_cache.update(at=0.0, dsn=None, items=None)
+
+
+def fetch_items_from_db() -> List[Item]:
+    """dash_items as Items, cached for ITEMS_CACHE_SECONDS (default 60; 0 disables).
+
+    The cache is per process and dropped after a quantity edit made through this API, so other
+    server instances (or the sheet sync) can show data up to that many seconds old.
+    """
+    ttl = float(os.getenv("ITEMS_CACHE_SECONDS", "60"))
+    now = time.monotonic()
+    dsn = os.getenv("DATABASE_URL")
+    if ttl > 0 and _items_cache["items"] is not None and _items_cache["dsn"] == dsn and now - _items_cache["at"] < ttl:
+        return _items_cache["items"]
+    items = [Item(**{k: v for k, v in row.items() if k != "sheet_row"}) for row in db.fetch_items()]
+    if ttl > 0:
+        _items_cache.update(at=now, dsn=dsn, items=items)
+    return items
+
+
+def load_items(response: Response) -> List[Item]:
+    """Postgres if DATABASE_URL is set (503 if it is down), else the sheet.
+
+    The source that served the request is reported in the X-Data-Source header.
+    """
+    if db.enabled():
+        try:
+            items = fetch_items_from_db()
+        except db.Error as exc:
+            logger.error("Postgres read failed: %s", exc)
+            raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+        response.headers["X-Data-Source"] = "postgres"
+        return items
+    response.headers["X-Data-Source"] = "sheet"
+    return fetch_items_from_sheet()
+
+
+def sheet_write_configured() -> bool:
+    return bool(os.getenv("GOOGLE_SHEETS_CREDENTIALS_PATH") or os.getenv("GOOGLE_SHEETS_CREDENTIALS_JSON"))
 
 
 # ==============================
@@ -377,14 +450,66 @@ def root():
     return {"message": "Inventory API is running"}
 
 
+@app.get("/health")
+def health():
+    if not db.enabled():
+        return {"source": "sheet", "ok": True}
+    try:
+        db.ping()
+        return {"source": "postgres", "ok": True}
+    except db.Error:
+        return {"source": "postgres", "ok": False}
+
+
 @app.get("/items", response_model=List[Item])
-def get_items():
-    return fetch_items_from_sheet()
+def get_items(response: Response):
+    return load_items(response)
+
+
+@app.get("/stock-alerts")
+def stock_alerts(
+    response: Response,
+    soon_days: int = Query(90, ge=1, le=3650),
+    low_stock: int = Query(3, ge=0, le=1_000_000),
+):
+    return build_alerts(load_items(response), soon_days=soon_days, low_stock=low_stock)
+
+
+@app.get("/stock-alerts.csv")
+def stock_alerts_csv(response: Response, soon_days: int = Query(90, ge=1, le=3650)):
+    body = expiring_csv(build_alerts(load_items(response), soon_days=soon_days))
+    return Response(body, media_type="text/csv", headers={
+        "Content-Disposition": f'attachment; filename="expiring-within-{soon_days}-days.csv"',
+        "X-Data-Source": response.headers.get("X-Data-Source", ""),
+    })
+
+
+@app.get("/sync-status")
+def sync_status():
+    """When the inventory was last copied from the sheet (database mode only)."""
+    if not db.enabled():
+        return {"source": "sheet"}
+    try:
+        row = db.fetch_sync_status()
+    except db.Error as exc:
+        logger.error("Postgres read of sync status failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    iso = lambda v: v.isoformat() if v else None
+    return {
+        "source": "postgres",
+        "last_success_at": iso(row["last_success_at"]),
+        "last_run_at": iso(row["last_run_at"]),
+        # last_run_refused (sync refused by its safety rails) may not exist in older views: treat refused as not ok
+        "last_run_ok": None if row["last_run_ok"] is None else bool(row["last_run_ok"]) and not row.get("last_run_refused"),
+        "last_run_refused": bool(row.get("last_run_refused")),
+        "last_warning_count": row["last_warning_count"],
+        "active_items": row["active_items"],
+    }
 
 
 @app.get("/kpis", response_model=KPIResponse)
-def calculate_kpis():
-    items_db = fetch_items_from_sheet()
+def calculate_kpis(response: Response):
+    items_db = load_items(response)
 
     # ==============================
     # BASIC KPIS
@@ -403,8 +528,10 @@ def calculate_kpis():
     else:
         avg_duration = 0.0
 
-    pallets = len(set(i.pallet_number for i in items_db))
-    boxes = len(set((i.category_box, i.box_number) for i in items_db))
+    # Items without a known pallet/box (0 or 'Unassigned') are not a pallet or box of their own.
+    pallets = len(set(i.pallet_number for i in items_db if i.pallet_number > 0))
+    boxes = len(set((i.pallet_number, i.category_box, i.box_number)
+                    for i in items_db if i.box_number > 0 and i.category_box != "Unassigned"))
 
     # ==============================
     # EXPIRY CALCULATIONS
@@ -469,6 +596,146 @@ def calculate_kpis():
     )
 
 
-@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse)
+def write_back_to_inventory_tab(row: Dict[str, Any], quantity: int) -> None:
+    """Mirror a DB quantity edit into the sheet row it came from (best effort, never raises)."""
+    try:
+        gid = os.getenv("INVENTORY_WORKSHEET_GID", "1019735220")
+        worksheet = get_gspread_worksheet(gid)
+        headers = [str(h or "").strip().lower() for h in worksheet.row_values(1)]
+        cells = worksheet.row_values(row["sheet_row"])
+        cell = lambda name: cells[headers.index(name)] if name in headers and headers.index(name) < len(cells) else ""
+        # Rows may have shifted since the last sync: only write if this is the same product.
+        image = (row["image_url"] or "").strip()
+        same_name = cell("name").strip().lower() == (row["name"] or "").strip().lower()
+        if not image or cell("image url").strip() != image or not same_name:
+            logger.warning("Sheet row %s does not match item %s (blank/different image URL or name); skipped write-back.", row["sheet_row"], row["id"])
+            return
+        if "quantity" not in headers:
+            logger.warning("Sheet tab has no Quantity column; skipped write-back.")
+            return
+        worksheet.update_cell(row["sheet_row"], headers.index("quantity") + 1, quantity)
+    except Exception as exc:  # DB change is already saved; the sheet is best effort
+        logger.warning("Saved to Postgres but Google Sheet write-back failed: %s", getattr(exc, "detail", exc))
+
+
+def update_quantity_in_db(item_id: str, quantity: int) -> QuantityUpdateResponse:
+    try:
+        row = db.set_quantity(item_id, quantity)
+        clear_items_cache()
+    except db.OperationalError as exc:
+        logger.error("Postgres unavailable on quantity update: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    except db.NoDataFound as exc:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} was not found.") from exc
+    except db.Error as exc:
+        logger.warning("Postgres rejected quantity update for %s: %s", item_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid quantity.") from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Item {item_id} was not found.")
+
+    if sheet_write_configured():
+        write_back_to_inventory_tab(row, quantity)
+
+    return QuantityUpdateResponse(item_id=row["id"], quantity=row["quantity"], total_value=row["total_value"])
+
+
+def require_admin(x_admin_token: Optional[str] = Header(None)):
+    token = (os.getenv("ADMIN_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(status_code=403, detail="Admin features are disabled (ADMIN_TOKEN not set).")
+    if not hmac.compare_digest((x_admin_token or "").encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="Admin token required.")
+
+
+def require_admin_with_db(x_admin_token: Optional[str] = Header(None)):
+    """Sheet mode keeps the original open quantity endpoint; the database path needs the admin token."""
+    if db.enabled():
+        require_admin(x_admin_token)
+
+
+@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse, dependencies=[Depends(require_admin_with_db)])
 def update_item_quantity(item_id: str, payload: QuantityUpdateRequest):
+    if db.enabled():
+        return update_quantity_in_db(item_id, payload.quantity)
     return update_sheet_quantity(item_id=item_id, quantity=payload.quantity)
+
+
+# ==============================
+# REQUESTS (database mode only)
+# ==============================
+REQUEST_STATUSES = ["Under Review", "Approved", "Shipped", "Delivered", "Cancelled", "Denied"]
+
+
+class RequestStatusUpdate(BaseModel):
+    status: str = Field(max_length=40)
+
+
+def group_request_lines(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Fold dash_requests lines into one entry per request, newest first."""
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for line in lines:
+        req = grouped.setdefault(line["Request ID"], {
+            "request_id": line["Request ID"], "org_name": line["Org Name"], "org_email": line["Org Email"],
+            "status": line["Status"], "timestamp": line["Timestamp"], "review_flag": False, "items": [],
+        })
+        req["review_flag"] = req["review_flag"] or line["Review Flag"] == "TRUE"
+        req["items"].append({"item_name": line["Item Name"], "category": line["Category"],
+                             "quantity": parse_int(line["Quantity Requested"]),
+                             "item_id": (line.get("Item ID") or "").strip()})
+    return sorted(grouped.values(), key=lambda r: r["timestamp"], reverse=True)
+
+
+def require_db():
+    if not db.enabled():
+        raise HTTPException(status_code=503, detail="Requests need the database (DATABASE_URL is not set).")
+
+
+@app.get("/requests", dependencies=[Depends(require_admin), Depends(require_db)])
+def list_requests(response: Response):
+    try:
+        requests_ = group_request_lines(db.fetch_request_lines())
+        add_stock_warnings(requests_, load_items(response))
+        return {"statuses": REQUEST_STATUSES, "requests": requests_}
+    except db.Error as exc:
+        logger.error("Postgres read of requests failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+
+
+@app.get("/requests/{request_id}/packing-list.csv", dependencies=[Depends(require_admin), Depends(require_db)])
+def request_packing_list(request_id: str, response: Response):
+    try:
+        requests_ = group_request_lines(db.fetch_request_lines())
+    except db.Error as exc:
+        logger.error("Postgres read of requests failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    request = next((r for r in requests_ if r["request_id"] == request_id), None)
+    if request is None:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
+    body = packing_list_csv(request, load_items(response))
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", request_id)
+    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="packing-list-{safe_id}.csv"'})
+
+
+@app.post("/requests/{request_id}/status", dependencies=[Depends(require_admin), Depends(require_db)])
+def update_request_status(request_id: str, payload: RequestStatusUpdate):
+    try:
+        found, status = db.set_request_status(request_id, payload.status)
+        clear_items_cache()  # any write through this API starts the next read from the database
+    except db.OperationalError as exc:
+        logger.error("Postgres unavailable on request status update: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable.") from exc
+    except db.Error as exc:
+        msg = str(exc)
+        if "cannot change request" in msg:
+            raise HTTPException(status_code=409, detail=msg.splitlines()[0].replace("ERROR:  ", "")) from exc
+        logger.warning("Postgres rejected request status update: %s", exc)
+        raise HTTPException(status_code=400, detail="Invalid status.") from exc
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Request {request_id} was not found.")
+    return {"request_id": request_id, "status": status}
+
+
+# ==============================
+# OPS SHIPMENTS (database mode only)
+# ==============================
+shipments.install(app, require_admin, clear_items_cache)
