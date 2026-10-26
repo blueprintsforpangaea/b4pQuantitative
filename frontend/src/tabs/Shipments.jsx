@@ -26,7 +26,8 @@ export default function Shipments({ items, state, focus = null }) {
   const [printId, setPrintId] = useState(null);
   const [pastLimit, setPastLimit] = useState(PAST_PAGE);
   const [tokenVersion, setTokenVersion] = useState(0);
-  const canEdit = useMemo(() => Boolean(readAdminToken()), [tokenVersion]);
+  // Sheet mode keeps shipments in this browser, like before the database: no admin token needed.
+  const canEdit = useMemo(() => state.local || Boolean(readAdminToken()), [state.local, tokenVersion]);
 
   // Jump from a KPI data point: open the Past list on that shipment.
   useEffect(() => {
@@ -71,7 +72,11 @@ export default function Shipments({ items, state, focus = null }) {
       </div>
 
       <UnlockBar canEdit={canEdit} onUnlock={() => { setTokenVersion((v) => v + 1); setNotice(""); reload(); }} />
-      <LegacyImportBanner canEdit={canEdit} onImport={state.importOld} />
+      {state.local ? (
+        <p className="ship-hint" role="note">The dashboard is reading the Google Sheet, so shipments are saved in this browser only.</p>
+      ) : (
+        <LegacyImportBanner canEdit={canEdit} onImport={state.importOld} />
+      )}
       {error ? <p className="ship-error" role="alert">{error} <button type="button" className="secondary-button" onClick={reload}>Retry</button></p> : null}
       {notice ? <p className="ship-error" role="alert">{notice}</p> : null}
 

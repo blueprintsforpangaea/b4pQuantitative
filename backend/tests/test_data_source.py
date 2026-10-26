@@ -216,6 +216,7 @@ def test_admin_token(monkeypatch):
 
 @pytest.mark.parametrize("value", [None, "", "   "])
 def test_fails_closed_without_admin_token(monkeypatch, value):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://127.0.0.1:1/nope")
     if value is None:
         monkeypatch.delenv("ADMIN_TOKEN")
     else:
@@ -394,7 +395,8 @@ def test_requests_need_admin_and_db(monkeypatch):
     monkeypatch.delenv("ADMIN_TOKEN")
     r = client.get("/requests")
     assert r.status_code == 403 and r.json()["detail"] == "Admin features are disabled (ADMIN_TOKEN not set)."
-    assert client.post("/items/A1/quantity", json={"quantity": 1}).json()["detail"] == "Admin features are disabled (ADMIN_TOKEN not set)."
+    # sheet mode keeps main's open quantity endpoint: it gets past auth to the sheet-credentials check
+    assert "Google Sheets credentials" in client.post("/items/A1/quantity", json={"quantity": 1}).json()["detail"]
 
 
 @needs_db
@@ -878,3 +880,13 @@ def test_item_id_conflicting_with_requested_lot_falls_back_to_name_matching():
     assert second[hdr.index("Match")] == "In stock (requested item)" and second[hdr.index("Supply ID")] == "1"
     add_stock_warnings([req], items)
     assert req["id_conflicts"] == [{"item_name": "Gauze 4x4", "message": "Item ID points to a different lot than requested; check"}]
+
+
+def test_sheet_mode_quantity_needs_no_token(monkeypatch):
+    """Without DATABASE_URL the quantity endpoint stays open, as on main; the sheet call itself is stubbed."""
+    calls = []
+    monkeypatch.setattr(appmod, "update_sheet_quantity", lambda item_id, quantity: calls.append((item_id, quantity)) or
+                        appmod.QuantityUpdateResponse(item_id=item_id, quantity=quantity, total_value=0))
+    monkeypatch.delenv("ADMIN_TOKEN")
+    r = anon.post("/items/7/quantity", json={"quantity": 3})
+    assert r.status_code == 200 and calls == [("7", 3)]

@@ -4,13 +4,14 @@ import StockAlerts from "./StockAlerts.jsx";
 import Requests from "./Requests.jsx";
 import SyncCell from "./SyncCell.jsx";
 import { API_BASE, tabs } from "./lib/config.js";
-import { useAllocations } from "./lib/shipments.js";
+import { groupAllocationsByItem, useAllocations } from "./lib/shipments.js";
+import { useDataSource } from "./lib/dataSource.js";
 import { averageShipmentDays, parseLocalDate, todayIsoDate } from "./lib/dates.js";
 import { formatNumber } from "./lib/format.js";
 import { buildInventoryRows, inventoryStatusForItem } from "./lib/inventory.js";
 import { normalizeRequestedQuantity, normalizeShipmentType, requestedShipmentItemValue } from "./lib/shipments.js";
 import { useShipments } from "./lib/useShipments.js";
-import { toLegacyShipments } from "./lib/shipmentsLogic.js";
+import { isActive, toLegacyShipments } from "./lib/shipmentsLogic.js";
 import { AddItemsModal } from "./components/ShipmentForms.jsx";
 import { applyDashboardTooltips } from "./lib/tooltips.js";
 import TotalInventory from "./tabs/TotalInventory.jsx";
@@ -22,7 +23,8 @@ import { InventoryDetailsModal } from "./components/InventoryModals.jsx";
 import ShipmentKpiModals from "./components/ShipmentKpiModals.jsx";
 
 export default function App() {
-  const { allocations, byItem: allocationsByItem } = useAllocations();
+  const source = useDataSource();
+  const fetchedAllocations = useAllocations();
   const [activeTab, setActiveTab] = useState("inventory");
   const [activeShipmentSubtab, setActiveShipmentSubtab] = useState("current");
   const [activeShipmentKpiSubtab, setActiveShipmentKpiSubtab] = useState("overview");
@@ -44,7 +46,16 @@ export default function App() {
   const [isInventoryFiltersOpen, setIsInventoryFiltersOpen] = useState(false);
   const [showFloatingInventoryAction, setShowFloatingInventoryAction] = useState(false);
   const [shipmentFocus, setShipmentFocus] = useState(null);
-  const shipmentsState = useShipments({ items });
+  const shipmentsState = useShipments({ items, source });
+  // Sheet mode: allocations come from the shipments kept in this browser, in the /allocations shape.
+  const allocations = useMemo(
+    () => (shipmentsState.local ? localAllocations(shipmentsState.shipments) : fetchedAllocations.allocations),
+    [shipmentsState.local, shipmentsState.shipments, fetchedAllocations.allocations]
+  );
+  const allocationsByItem = useMemo(
+    () => (shipmentsState.local ? groupAllocationsByItem(allocations) : fetchedAllocations.byItem),
+    [shipmentsState.local, allocations, fetchedAllocations.byItem]
+  );
   const { shipments, nonInventoryShipments } = useMemo(
     () => toLegacyShipments(shipmentsState.shipments),
     [shipmentsState.shipments]
@@ -460,7 +471,7 @@ export default function App() {
 
       {!loading && !error && activeTab === "stock-alerts" ? <StockAlerts /> : null}
 
-      {!loading && !error && activeTab === "requests" ? <Requests /> : null}
+      {!loading && !error && activeTab === "requests" ? <Requests source={source} /> : null}
 
       {!loading && !error && activeTab === "kpis" ? (
 <InventoryKpis
@@ -559,4 +570,14 @@ export default function App() {
         />
     </main>
   );
+}
+
+function localAllocations(shipments) {
+  return shipments
+    .filter(isActive)
+    .flatMap((shipment) =>
+      (shipment.lines || [])
+        .filter((line) => line.item_id !== null && line.item_id !== undefined)
+        .map((line) => ({ item_id: String(line.item_id), shipment_id: shipment.id, shipment_name: shipment.name, stage: shipment.stage, quantity: line.quantity }))
+    );
 }

@@ -1,5 +1,5 @@
 import { API_BASE } from "./config.js";
-import { ACTIVE_STAGES, STAGES, shipmentTotals } from "./shipmentsLogic.js";
+import { ACTIVE_STAGES, STAGES, buildImportBody, shipmentTotals } from "./shipmentsLogic.js";
 
 export const ADMIN_TOKEN_KEY = "b4p-admin-token";
 
@@ -76,7 +76,9 @@ function expiryStatus(expiration, asOf) {
 // In-memory implementation of the same contract, for development and tests before the API lands.
 // `inventory` is a list of {id, name, category, quantity, unit_value, expiration_date, lot_number,
 // pallet_number, category_box, box_number}; it is copied so shipping can take stock.
-export function createMockApi(inventorySource = [], seed = []) {
+// Options: `takeStock: false` leaves the copied stock alone when a shipment ships (the sheet stays the
+// source of truth); `onChange(shipments)` runs after every successful write.
+export function createMockApi(inventorySource = [], seed = [], { takeStock = true, onChange = null } = {}) {
   const stock = new Map();
   // Items may load after the API is created; copy new ones in on every call.
   const syncStock = () => {
@@ -87,7 +89,7 @@ export function createMockApi(inventorySource = [], seed = []) {
   };
   syncStock();
   const shipments = new Map(seed.map((shipment) => [shipment.id, structuredClone(shipment)]));
-  let counter = 100;
+  let counter = Math.max(100, ...seed.flatMap((s) => (s.lines || []).map((l) => Number(l.id) || 0)));
 
   const allocatedActive = (itemId, exceptShipmentId = null) =>
     [...shipments.values()]
@@ -174,7 +176,7 @@ export function createMockApi(inventorySource = [], seed = []) {
       for (const line of shipment.lines) {
         if (line.item_id === null) continue;
         checkAllocation(shipment.id, line.item_id, line.quantity);
-        stock.get(String(line.item_id)).quantity -= line.quantity;
+        if (takeStock) stock.get(String(line.item_id)).quantity -= line.quantity;
       }
       shipment.ship_date = shipment.ship_date || today();
     }
@@ -242,7 +244,13 @@ export function createMockApi(inventorySource = [], seed = []) {
       return result;
     },
   };
-  const synced = Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, (...args) => { syncStock(); return fn(...args); }]));
+  const READS = ["list", "get"];
+  const synced = Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, async (...args) => {
+    syncStock();
+    const result = await fn(...args);
+    if (onChange && !READS.includes(name)) onChange([...shipments.values()].map((s) => structuredClone(s)));
+    return result;
+  }]));
 
   return synced;
 
@@ -268,11 +276,61 @@ export function createMockApi(inventorySource = [], seed = []) {
   }
 }
 
+// Shipments from the pre-database dashboard, which kept them in these localStorage keys.
+export const LEGACY_SHIPMENTS_KEY = "blueprints-current-shipments";
+export const LEGACY_NON_INVENTORY_KEY = "blueprints-non-inventory-shipments";
+// Shipments made while the dashboard reads the Google Sheet (no DATABASE_URL), in the API's shape.
+export const LOCAL_SHIPMENTS_KEY = "blueprints-shipments-local";
+
+export function readStoredList(key) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "null");
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readLegacyBody() {
+  return buildImportBody(readStoredList(LEGACY_SHIPMENTS_KEY) || [], readStoredList(LEGACY_NON_INVENTORY_KEY) || []);
+}
+
+// Sheet mode: the same contract as the API, kept in this browser's localStorage like the dashboard
+// before the database. The first use copies in the old localStorage shipments (the old keys stay).
+export function createLocalApi(inventorySource) {
+  const save = (shipments) => {
+    try {
+      window.localStorage.setItem(LOCAL_SHIPMENTS_KEY, JSON.stringify(shipments));
+    } catch {
+      // storage full or blocked; the shipments stay in memory for this page
+    }
+  };
+  const stored = readStoredList(LOCAL_SHIPMENTS_KEY);
+  const api = createMockApi(inventorySource, stored || [], { takeStock: false, onChange: save });
+  // Wait for the inventory before copying old shipments in, so their lines keep their item ids.
+  let seeding = stored ? Promise.resolve() : null;
+  const seed = () => {
+    if (!seeding) {
+      const inventory = typeof inventorySource === "function" ? inventorySource() : inventorySource;
+      if (inventory.length) seeding = api.importOld(readLegacyBody()).catch(() => {});
+    }
+    return seeding;
+  };
+  return Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, async (...args) => { await seed(); return fn(...args); }]));
+}
+
 let mockSingleton = null;
+let localSingleton = null;
 let currentInventoryGetter = () => [];
 
-// Real API unless VITE_SHIPMENTS_MOCK=1 (dev only; data is synthetic and lives in memory).
-export function getShipmentsApi(getInventory) {
+// Real API unless VITE_SHIPMENTS_MOCK=1 (dev only; data is synthetic and lives in memory) or the
+// server reads the Google Sheet (`source` "sheet"), where shipments live in this browser.
+export function getShipmentsApi(getInventory, source = "postgres") {
+  if (source === "sheet") {
+    currentInventoryGetter = getInventory;
+    localSingleton = localSingleton || createLocalApi(() => currentInventoryGetter());
+    return localSingleton;
+  }
   if (import.meta.env.VITE_SHIPMENTS_MOCK === "1") {
     // Always read through the latest getter (React may discard the first render's closure).
     currentInventoryGetter = getInventory;

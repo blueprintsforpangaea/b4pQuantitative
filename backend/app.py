@@ -647,7 +647,13 @@ def require_admin(x_admin_token: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="Admin token required.")
 
 
-@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse, dependencies=[Depends(require_admin)])
+def require_admin_with_db(x_admin_token: Optional[str] = Header(None)):
+    """Sheet mode keeps the original open quantity endpoint; the database path needs the admin token."""
+    if db.enabled():
+        require_admin(x_admin_token)
+
+
+@app.post("/items/{item_id}/quantity", response_model=QuantityUpdateResponse, dependencies=[Depends(require_admin_with_db)])
 def update_item_quantity(item_id: str, payload: QuantityUpdateRequest):
     if db.enabled():
         return update_quantity_in_db(item_id, payload.quantity)

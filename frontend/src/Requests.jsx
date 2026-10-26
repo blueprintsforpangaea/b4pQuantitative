@@ -22,7 +22,21 @@ const readToken = () => {
   }
 };
 
-export default function Requests() {
+// `source` "sheet": the server reads the Google Sheet (no DATABASE_URL), and requests need the database.
+export default function Requests({ source = "postgres" }) {
+  if (source === "sheet") {
+    return (
+      <section className="panel">
+        <p className="section-label">Requests</p>
+        <h2>Requests need the database</h2>
+        <p>The dashboard is reading the Google Sheet. This tab turns on when the database is connected (DATABASE_URL is set on the server).</p>
+      </section>
+    );
+  }
+  return <RequestsPanel />;
+}
+
+function RequestsPanel() {
   const [token, setToken] = useState(readToken);
   const [tokenInput, setTokenInput] = useState("");
   const [data, setData] = useState(null);

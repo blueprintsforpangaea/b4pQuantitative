@@ -3,16 +3,23 @@ import { getShipmentsApi } from "./shipmentsApi.js";
 import { autoStageAfterTick, isActive } from "./shipmentsLogic.js";
 
 // Shared shipments state. `api` can be injected (tests, mock); otherwise the real/mock API is used.
-export function useShipments({ items = [], api: injectedApi } = {}) {
+// `source` is the server's data source ("sheet" | "postgres", null while unknown); with "sheet" the
+// shipments live in this browser and need no admin token.
+export function useShipments({ items = [], api: injectedApi, source = "postgres" } = {}) {
   const itemsRef = useRef(items);
   itemsRef.current = items;
-  const api = useMemo(() => injectedApi || getShipmentsApi(() => itemsRef.current.map(toMockItem)), [injectedApi]);
+  const local = !injectedApi && source === "sheet";
+  const api = useMemo(
+    () => injectedApi || (source ? getShipmentsApi(() => itemsRef.current.map(toMockItem), source) : null),
+    [injectedApi, source]
+  );
   const [shipments, setShipments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const reload = useCallback(async () => {
+    if (!api) return;
     try {
       setError("");
       setShipments(await api.list("all"));
@@ -23,14 +30,17 @@ export function useShipments({ items = [], api: injectedApi } = {}) {
     }
   }, [api]);
 
+  // Browser shipments are read once the inventory is in, so old lines can be matched to it.
+  const inventoryReady = items.length > 0;
   useEffect(() => {
     reload();
-  }, [reload]);
+  }, [reload, local && inventoryReady]);
 
   // Runs a write, then refreshes. Returns {ok, error}. Errors never throw into the UI.
   const run = useCallback(
     async (operation) => {
       setNotice("");
+      if (!api) return { ok: false, error: "Shipments are still loading." };
       try {
         const result = await operation(api);
         await reload();
@@ -64,7 +74,7 @@ export function useShipments({ items = [], api: injectedApi } = {}) {
     [run]
   );
 
-  return { shipments, loading, error, notice, setNotice, reload, ...actions };
+  return { shipments, loading, error, notice, setNotice, reload, local, ...actions };
 }
 
 function toMockItem(item) {

@@ -1,25 +1,21 @@
 import { useState } from "react";
-import { saveAdminToken } from "../lib/shipmentsApi.js";
-import { buildImportBody } from "../lib/shipmentsLogic.js";
+import { LOCAL_SHIPMENTS_KEY, readLegacyBody, readStoredList, saveAdminToken } from "../lib/shipmentsApi.js";
+import { buildImportBody, toLegacyShipments } from "../lib/shipmentsLogic.js";
 
 const IMPORTED_FLAG = "blueprints-shipments-imported";
 
-function readJson(key) {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(key) || "null");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
+// Old-dashboard shipments plus any saved in this browser while the server read the Google Sheet
+// (converted to the old shape the import takes). Same id twice: the browser copy wins.
 export function readLegacyShipments() {
   try {
     if (window.localStorage.getItem(IMPORTED_FLAG)) return null;
   } catch {
     return null;
   }
-  const body = buildImportBody(readJson("blueprints-current-shipments"), readJson("blueprints-non-inventory-shipments"));
+  const old = readLegacyBody();
+  const local = toLegacyShipments(readStoredList(LOCAL_SHIPMENTS_KEY) || []);
+  const merge = (fresh, older) => [...fresh, ...older.filter((entry) => !fresh.some((f) => f.id === entry.id))];
+  const body = buildImportBody(merge(local.shipments, old.shipments), merge(local.nonInventoryShipments, old.non_inventory));
   return body.shipments.length + body.non_inventory.length > 0 ? body : null;
 }
 
